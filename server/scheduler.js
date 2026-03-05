@@ -32,6 +32,7 @@ class Scheduler {
       running: false,
       workers: [],
       courses: [],
+      courseStates: new Map(),
       rps: 0,
     };
 
@@ -45,10 +46,12 @@ class Scheduler {
 
   getState() {
     const activeWorkers = this.state.workers.filter((worker) => worker.active).length;
+    const courses = this._snapshotCourses();
     return {
       running: this.state.running,
       rps: this.state.rps,
       workers: activeWorkers,
+      courses,
     };
   }
 
@@ -59,20 +62,34 @@ class Scheduler {
 
     const courses = this._normalizeCourses(payload.courses);
     const concurrency = Number(payload.concurrency || DEFAULT_CONCURRENCY);
+    const courseStates = new Map(
+      courses.map((course) => [
+        course.lessonAssoc,
+        {
+          lessonAssoc: course.lessonAssoc,
+          status: course.isPaused ? 'paused' : 'running',
+          success: false,
+          markedForRemoval: false,
+          activeWorkers: 0,
+          workerSeq: 0,
+        },
+      ]),
+    );
 
     this._job = {
       studentId: String(payload.studentId),
       turnId: String(payload.turnId),
       headers: this._normalizeHeaders(payload.headers, payload.cookie),
-      courses,
+      courses: courses.map((course) => course.lessonAssoc),
       concurrency,
       skipCaptcha: Boolean(payload.skipCaptcha),
       abortController: new AbortController(),
-      courseStates: new Map(courses.map((courseId) => [courseId, { success: false }])),
+      courseStates,
     };
 
     this.state.running = true;
-    this.state.courses = [...courses];
+    this.state.courses = courses.map((course) => course.lessonAssoc);
+    this.state.courseStates = courseStates;
     this.state.rps = 0;
     this._requestTimestamps = [];
     this._captchaWaiters = [];
@@ -128,9 +145,10 @@ class Scheduler {
   }
 
   async stop() {
+    const removedCourses = this._collectMarkedForRemovalCourses();
     if (!this.state.running && !this._job) {
       this._resetRuntimeState();
-      return;
+      return { removedCourses };
     }
 
     this.state.running = false;
@@ -158,9 +176,14 @@ class Scheduler {
     this._captchaLoopPromise = null;
     this._workerPromises = [];
     this._captchaWaiters = [];
+    this._requestTimestamps = [];
+    this.state.workers = [];
+    this.state.courses = [];
+    this.state.courseStates = new Map();
     this.state.rps = 0;
 
     this.logger.info('scheduler stopped');
+    return { removedCourses };
   }
 
   _validatePayload(payload) {
@@ -201,7 +224,10 @@ class Scheduler {
       if (seen.has(lessonAssoc)) continue;
 
       seen.add(lessonAssoc);
-      ids.push(lessonAssoc);
+      ids.push({
+        lessonAssoc,
+        isPaused: Boolean(typeof item === 'object' && item !== null && item.isPaused),
+      });
     }
 
     if (ids.length === 0) {
@@ -235,27 +261,45 @@ class Scheduler {
     this._workerPromises = [];
 
     for (const lessonAssoc of job.courses) {
-      for (let i = 0; i < job.concurrency; i += 1) {
-        const worker = {
-          id: `${lessonAssoc}-${i}`,
-          lessonAssoc,
-          active: true,
-        };
+      const courseState = job.courseStates.get(lessonAssoc);
+      if (!courseState || courseState.status !== 'running') continue;
+      this._spawnWorkersForCourse(job, lessonAssoc, job.concurrency);
+    }
+  }
 
-        this.state.workers.push(worker);
-        const runPromise = this._runWorker(job, worker).catch((error) => {
+  _spawnWorkersForCourse(job, lessonAssoc, count) {
+    const courseState = job.courseStates.get(lessonAssoc);
+    if (!courseState || courseState.success || courseState.status !== 'running') {
+      return;
+    }
+
+    for (let i = 0; i < count; i += 1) {
+      const worker = {
+        id: `${lessonAssoc}-${courseState.workerSeq}`,
+        lessonAssoc,
+        active: true,
+        counted: true,
+      };
+      courseState.workerSeq += 1;
+      courseState.activeWorkers += 1;
+
+      this.state.workers.push(worker);
+      const runPromise = this._runWorker(job, worker)
+        .catch((error) => {
           if (this._isAbortError(error)) return;
           this.logger.warn({ err: error, workerId: worker.id }, 'worker terminated with error');
+        })
+        .finally(() => {
+          this._onWorkerExit(worker);
         });
-        this._workerPromises.push(runPromise);
-      }
+      this._workerPromises.push(runPromise);
     }
   }
 
   async _runWorker(job, worker) {
     while (this.state.running && worker.active) {
       const courseState = job.courseStates.get(worker.lessonAssoc);
-      if (!courseState || courseState.success) {
+      if (!courseState || courseState.success || courseState.status !== 'running') {
         worker.active = false;
         break;
       }
@@ -274,13 +318,14 @@ class Scheduler {
         if (!addReqData) continue;
 
         if (!job.skipCaptcha) {
-          const permitted = await this._waitForCaptchaPermit(worker.id);
+          const permitted = await this._waitForCaptchaPermit(worker.id, worker.lessonAssoc);
           if (
             !permitted ||
             !this.state.running ||
             job.abortController.signal.aborted ||
             !worker.active ||
-            courseState.success
+            courseState.success ||
+            courseState.status !== 'running'
           ) {
             break;
           }
@@ -289,7 +334,10 @@ class Scheduler {
         const success = await this._requestAddDropResponse(job, addReqData);
         if (success) {
           courseState.success = true;
+          courseState.status = 'success';
+          courseState.markedForRemoval = true;
           this._deactivateWorkersOfCourse(worker.lessonAssoc);
+          this._resolveCaptchaWaitersByCourse(worker.lessonAssoc, false);
           this.logger.info({ lessonAssoc: worker.lessonAssoc }, 'course grab success');
           break;
         }
@@ -303,10 +351,23 @@ class Scheduler {
   }
 
   _deactivateWorkersOfCourse(lessonAssoc) {
+    const courseState = this._job?.courseStates?.get(lessonAssoc);
     for (const worker of this.state.workers) {
       if (worker.lessonAssoc === lessonAssoc) {
+        if (worker.active && worker.counted && courseState) {
+          courseState.activeWorkers = Math.max(0, courseState.activeWorkers - 1);
+          worker.counted = false;
+        }
         worker.active = false;
       }
+    }
+  }
+
+  _onWorkerExit(worker) {
+    const courseState = this._job?.courseStates?.get(worker.lessonAssoc);
+    if (courseState && worker.counted) {
+      courseState.activeWorkers = Math.max(0, courseState.activeWorkers - 1);
+      worker.counted = false;
     }
   }
 
@@ -347,13 +408,13 @@ class Scheduler {
     return Boolean(parsed?.data?.success);
   }
 
-  _waitForCaptchaPermit(workerId) {
+  _waitForCaptchaPermit(workerId, lessonAssoc) {
     if (!this.state.running) {
       return Promise.resolve(false);
     }
 
     return new Promise((resolve) => {
-      this._captchaWaiters.push({ workerId, resolve });
+      this._captchaWaiters.push({ workerId, lessonAssoc, resolve });
     });
   }
 
@@ -361,6 +422,19 @@ class Scheduler {
     if (!this._captchaWaiters.length) return;
     const waiter = this._captchaWaiters.shift();
     waiter.resolve(true);
+  }
+
+  _resolveCaptchaWaitersByCourse(lessonAssoc, value) {
+    if (!this._captchaWaiters.length) return;
+    const remaining = [];
+    for (const waiter of this._captchaWaiters) {
+      if (waiter.lessonAssoc === lessonAssoc) {
+        waiter.resolve(value);
+      } else {
+        remaining.push(waiter);
+      }
+    }
+    this._captchaWaiters = remaining;
   }
 
   _resolveAllCaptchaWaiters() {
@@ -444,8 +518,87 @@ class Scheduler {
       running: false,
       workers: [],
       courses: [],
+      courseStates: new Map(),
       rps: 0,
     };
+  }
+
+  _snapshotCourses() {
+    const states = this.state.courseStates || new Map();
+    return this.state.courses.map((lessonAssoc) => {
+      const state = states.get(lessonAssoc) || null;
+      return {
+        lessonAssoc,
+        status: state?.status || 'pending',
+        workers: state?.activeWorkers || 0,
+        markedForRemoval: Boolean(state?.markedForRemoval),
+      };
+    });
+  }
+
+  _collectMarkedForRemovalCourses() {
+    if (!this._job?.courseStates) return [];
+    const removed = [];
+    for (const [lessonAssoc, state] of this._job.courseStates.entries()) {
+      if (state?.markedForRemoval) {
+        removed.push(Number(lessonAssoc));
+      }
+    }
+    return removed;
+  }
+
+  _assertRunnableJob() {
+    if (!this.state.running || !this._job) {
+      const error = new Error('scheduler is not running');
+      error.statusCode = 409;
+      throw error;
+    }
+  }
+
+  pauseCourse(lessonAssocInput) {
+    this._assertRunnableJob();
+    const lessonAssoc = this._normalizeLessonAssocForControl(lessonAssocInput);
+    const courseState = this._job.courseStates.get(lessonAssoc);
+    if (!courseState) {
+      throw this._badRequest(`unknown lessonAssoc: ${lessonAssoc}`);
+    }
+
+    if (courseState.status === 'success') {
+      return this.getState();
+    }
+
+    courseState.status = 'paused';
+    this._deactivateWorkersOfCourse(lessonAssoc);
+    this._resolveCaptchaWaitersByCourse(lessonAssoc, false);
+    return this.getState();
+  }
+
+  resumeCourse(lessonAssocInput) {
+    this._assertRunnableJob();
+    const lessonAssoc = this._normalizeLessonAssocForControl(lessonAssocInput);
+    const courseState = this._job.courseStates.get(lessonAssoc);
+    if (!courseState) {
+      throw this._badRequest(`unknown lessonAssoc: ${lessonAssoc}`);
+    }
+    if (courseState.status === 'success') {
+      return this.getState();
+    }
+    if (courseState.status === 'running' && courseState.activeWorkers > 0) {
+      return this.getState();
+    }
+
+    courseState.status = 'running';
+    this._spawnWorkersForCourse(this._job, lessonAssoc, this._job.concurrency);
+    return this.getState();
+  }
+
+  _normalizeLessonAssocForControl(raw) {
+    const num = Number(raw);
+    const lessonAssoc = Math.trunc(num);
+    if (!Number.isFinite(num) || lessonAssoc <= 0) {
+      throw this._badRequest('lessonAssoc must be a positive integer');
+    }
+    return lessonAssoc;
   }
 
   _isAbortError(error) {

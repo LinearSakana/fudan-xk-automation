@@ -31,6 +31,7 @@
         rps: 0,
         workers: 0,
         statusIntervalId: null,
+        toBeRemoved: new Set(),
     };
     const WEEKDAY_LABELS = ['', '周一', '周二', '周三', '周四', '周五', '周六', '周日'];
 
@@ -58,7 +59,7 @@
     function normalizeConcurrency(value) {
         const num = Number(value);
         if (!Number.isFinite(num)) return 2;
-        return Math.min(30, Math.max(1, Math.trunc(num)));
+        return Math.min(10, Math.max(1, Math.trunc(num)));
     }
 
     function normalizeLessonAssoc(value) {
@@ -68,14 +69,19 @@
         return lessonAssoc > 0 ? lessonAssoc : null;
     }
 
-    function getRunnableCoursePayload() {
-        const assocs = uniqueNonEmpty(
-            STATE.courses
-                .filter(course => !course.isPaused && course.status !== 'success')
-                .map(course => normalizeLessonAssoc(course.lessonAssoc))
-                .filter(id => id !== null)
-        ).map(id => Number(id));
-        return assocs.map(lessonAssoc => ({lessonAssoc}));
+    function getCoursePayloadForServer() {
+        const seen = new Set();
+        const courses = [];
+        STATE.courses.forEach((course) => {
+            const lessonAssoc = normalizeLessonAssoc(course.lessonAssoc);
+            if (lessonAssoc === null || seen.has(lessonAssoc)) return;
+            seen.add(lessonAssoc);
+            courses.push({
+                lessonAssoc,
+                isPaused: Boolean(course.isPaused),
+            });
+        });
+        return courses;
     }
 
     async function requestLocalApi(path, method = 'GET', payload = null) {
@@ -347,7 +353,8 @@
                     if (STATE.isGrabbing) {
                         const statusClass = course.status === 'success' ? 'status-success' : (course.isPaused ? 'status-paused' : 'status-running');
                         const statusText = course.status === 'success' ? '成功' : (course.isPaused ? '已暂停' : '抢课中');
-                        rightContent = `<button class="course-status-pill ${statusClass}" title="${escapeHtml(statusText)}" aria-label="${escapeHtml(statusText)}" disabled></button>`;
+                        const disabledAttr = course.status === 'success' ? 'disabled' : '';
+                        rightContent = `<button class="course-status-pill ${statusClass}" data-index="${index}" data-action="toggle-pause" title="${escapeHtml(statusText)}" aria-label="${escapeHtml(statusText)}" ${disabledAttr}></button>`;
                     } else {
                         rightContent = `<div class="course-actions"><button data-index="${index}" data-action="delete" title="删除">✖</button></div>`;
                     }
@@ -391,13 +398,21 @@
             }
         },
         addEventListeners() {
-            this.courseListEl.addEventListener('click', (e) => {
+            this.courseListEl.addEventListener('click', async (e) => {
                 const target = e.target.closest('button');
                 if (!target) return;
                 const index = parseInt(target.dataset.index, 10);
                 if (Number.isNaN(index) || index < 0 || index >= STATE.courses.length) return;
+                const course = STATE.courses[index];
+                if (!course) return;
 
                 if (STATE.isGrabbing) {
+                    if (target.dataset.action !== 'toggle-pause' || course.status === 'success') return;
+                    try {
+                        await ExecutionEngine.toggleCoursePause(course.lessonAssoc, !course.isPaused);
+                    } catch (error) {
+                        alert(`课程状态切换失败: ${error.message || error}`);
+                    }
                     return;
                 }
 
@@ -676,6 +691,62 @@
             }
             return infos;
         },
+        syncCoursesFromServer(statusCourses) {
+            if (!Array.isArray(statusCourses)) return;
+            const byId = new Map(
+                statusCourses
+                    .map((course) => {
+                        const lessonAssoc = normalizeLessonAssoc(course?.lessonAssoc);
+                        if (lessonAssoc === null) return null;
+                        return [lessonAssoc, course];
+                    })
+                    .filter(Boolean)
+            );
+            if (byId.size === 0) return;
+
+            let changed = false;
+            STATE.courses = STATE.courses.map((course) => {
+                const serverCourse = byId.get(course.lessonAssoc);
+                if (!serverCourse) return course;
+
+                const nextStatus = serverCourse.status === 'success' ? 'success' : 'pending';
+                const nextPaused = serverCourse.status === 'paused';
+                const nextCourse = {
+                    ...course,
+                    status: nextStatus,
+                    isPaused: nextPaused,
+                };
+
+                if (serverCourse.markedForRemoval) {
+                    STATE.toBeRemoved.add(course.lessonAssoc);
+                } else {
+                    STATE.toBeRemoved.delete(course.lessonAssoc);
+                }
+
+                if (nextCourse.status !== course.status || nextCourse.isPaused !== course.isPaused) {
+                    changed = true;
+                }
+                return nextCourse;
+            });
+
+            if (changed) {
+                Persistence.save();
+            }
+        },
+        async toggleCoursePause(lessonAssocRaw, pause) {
+            const lessonAssoc = normalizeLessonAssoc(lessonAssocRaw);
+            if (lessonAssoc === null) {
+                throw new Error('lessonAssoc 无效');
+            }
+            if (!STATE.isGrabbing) return;
+
+            const path = pause ? '/course/pause' : '/course/resume';
+            const status = await requestLocalApi(path, 'POST', {lessonAssoc});
+            this.syncCoursesFromServer(status?.courses);
+            STATE.rps = Number(status?.rps || 0);
+            STATE.workers = Number(status?.workers || 0);
+            UI.render();
+        },
         async start() {
             if (!STATE.studentId || !STATE.turnId || Object.keys(STATE.headers).length === 0) {
                 alert('上下文信息不完整，请先在网页上进行一次手动选课操作以自动捕获');
@@ -687,10 +758,12 @@
             }
 
             STATE.concurrency = normalizeConcurrency(STATE.concurrency);
+            STATE.toBeRemoved.clear();
             STATE.courses.forEach(c => { c.status = 'pending'; });
             await this.syncCourseDetails(STATE.courses.map(c => c.lessonAssoc)).catch(() => {});
-            const courses = getRunnableCoursePayload();
-            if (courses.length === 0) {
+            const courses = getCoursePayloadForServer();
+            const runnableCount = courses.filter(course => !course.isPaused).length;
+            if (runnableCount === 0) {
                 alert('没有可执行课程（可能全部已暂停），请检查课程列表');
                 UI.render();
                 return;
@@ -712,13 +785,25 @@
             UI.render();
         },
         async stop() {
-            await requestLocalApi('/stop', 'POST', {}).catch(() => {});
+            const stopResult = await requestLocalApi('/stop', 'POST', {}).catch(() => ({}));
             STATE.isGrabbing = false;
             STATE.rps = 0;
             STATE.workers = 0;
-            STATE.courses.forEach(course => {
+            const removedCourses = uniqueNonEmpty(
+                ((stopResult?.removedCourses || []).map(id => normalizeLessonAssoc(id)).filter(id => id !== null))
+            ).map(Number);
+            const removedSet = new Set([...STATE.toBeRemoved, ...removedCourses]);
+            if (removedSet.size > 0) {
+                STATE.courses = STATE.courses.filter(course => !removedSet.has(course.lessonAssoc));
+            }
+            STATE.toBeRemoved.clear();
+            STATE.courses.forEach((course) => {
                 course.isPaused = false;
+                if (course.status !== 'success') {
+                    course.status = 'pending';
+                }
             });
+            Persistence.save();
             this.stopStatusPolling();
             UI.render();
         },
@@ -726,6 +811,7 @@
             const status = await requestLocalApi('/status', 'GET');
             STATE.rps = Number(status?.rps || 0);
             STATE.workers = Number(status?.workers || 0);
+            this.syncCoursesFromServer(status?.courses);
             if (STATE.isGrabbing && status?.running === false) {
                 STATE.isGrabbing = false;
                 this.stopStatusPolling();
@@ -757,6 +843,7 @@
                 STATE.isGrabbing = Boolean(status?.running);
                 STATE.rps = Number(status?.rps || 0);
                 STATE.workers = Number(status?.workers || 0);
+                ExecutionEngine.syncCoursesFromServer(status?.courses);
                 if (STATE.isGrabbing) {
                     ExecutionEngine.startStatusPolling();
                 }

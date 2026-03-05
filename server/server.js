@@ -36,8 +36,20 @@ function buildServer() {
   });
 
   fastify.post('/stop', async (_request, reply) => {
-    await scheduler.stop();
-    return reply.send({ ok: true });
+    const result = await scheduler.stop();
+    return reply.send({ ok: true, removedCourses: result.removedCourses || [] });
+  });
+
+  fastify.post('/course/pause', async (request, reply) => {
+    const lessonAssoc = request.body?.lessonAssoc;
+    const state = scheduler.pauseCourse(lessonAssoc);
+    return reply.send({ ok: true, ...state });
+  });
+
+  fastify.post('/course/resume', async (request, reply) => {
+    const lessonAssoc = request.body?.lessonAssoc;
+    const state = scheduler.resumeCourse(lessonAssoc);
+    return reply.send({ ok: true, ...state });
   });
 
   fastify.get('/status', async (_request, reply) => {
