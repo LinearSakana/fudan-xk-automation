@@ -190,7 +190,7 @@
                 .course-status-pill:not(:disabled) { cursor: pointer; }
                 .course-status-pill:not(:disabled):hover { transform: scale(1.15); }
                 .status-running { background: #4299e1; box-shadow: 0 0 0 1px #4299e1, 0 0 8px rgba(66, 153, 225, 0.4); animation: pulse 2s infinite; }
-                .status-success { background: #48bb78; box-shadow: 0 0 0 1px #48bb78; }
+                .status-success { background: #34d399; box-shadow: none; border: 1px solid #2f855a; }
                 .status-paused { background: #a0aec0; box-shadow: 0 0 0 1px #a0aec0; }
                 @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(66, 153, 225, 0.4); } 70% { box-shadow: 0 0 0 6px rgba(66, 153, 225, 0); } 100% { box-shadow: 0 0 0 0 rgba(66, 153, 225, 0); } }
                 .course-actions button { background: none; border: none; cursor: pointer; font-size: 14px; color: #e53e3e; opacity: 0.6; transition: all 0.2s; padding: 4px; display: flex; align-items: center; justify-content: center; border-radius: 6px; }
@@ -204,7 +204,7 @@
                 .btn-start:active:not(:disabled) { transform: translateY(1px); }
                 .btn-start.grabbing { background: linear-gradient(135deg, #f56565 0%, #e53e3e 100%); box-shadow: 0 4px 12px rgba(229, 62, 62, 0.3); }
                 .btn-start.grabbing:hover:not(:disabled) { box-shadow: 0 6px 16px rgba(229, 62, 62, 0.4); }
-                button:disabled { cursor: not-allowed; opacity: 0.5; filter: grayscale(100%); }
+                button:disabled { cursor: not-allowed; opacity: 0.5; }
                 .course-hover-card { position: fixed; z-index: 10000; width: max-content; max-width: 320px; padding: 14px; border: 1px solid rgba(255,255,255,0.8); border-radius: 12px; background: rgba(255, 255, 255, 0.95); backdrop-filter: blur(12px); box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1), 0 4px 10px rgba(0, 0, 0, 0.05); color: #2d3748; font-size: 12px; line-height: 1.5; pointer-events: none; opacity: 0; transform: translateY(8px); transition: opacity 0.15s ease, transform 0.15s ease; }
                 .course-hover-card.show { opacity: 1; transform: translateY(0); }
                 .hover-title { font-size: 14px; font-weight: 600; color: #1a202c; margin-bottom: 8px; }
