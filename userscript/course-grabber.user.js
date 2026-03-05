@@ -32,6 +32,7 @@
         workers: 0,
         statusIntervalId: null,
         toBeRemoved: new Set(),
+        serverErrorNoticeKey: '',
     };
     const WEEKDAY_LABELS = ['', '周一', '周二', '周三', '周四', '周五', '周六', '周日'];
 
@@ -441,8 +442,16 @@
             this.courseListEl.addEventListener('scroll', () => {
                 this.hideHoverCard();
             });
-            document.getElementById('grab-btn').addEventListener('click', () => {
-                STATE.isGrabbing ? ExecutionEngine.stop() : ExecutionEngine.start();
+            document.getElementById('grab-btn').addEventListener('click', async () => {
+                try {
+                    if (STATE.isGrabbing) {
+                        await ExecutionEngine.stop();
+                    } else {
+                        await ExecutionEngine.start();
+                    }
+                } catch (error) {
+                    alert(`请求本地服务失败: ${error.message || error}`);
+                }
             });
             document.getElementById('skip-captcha-checkbox').addEventListener('change', (e) => {
                 STATE.skipCaptcha = e.target.checked;
@@ -733,6 +742,26 @@
                 Persistence.save();
             }
         },
+        handleServerFatalError(status) {
+            const serverError = status?.error;
+            if (!serverError || typeof serverError !== 'object') return false;
+
+            const code = String(serverError.code || 'SERVER_FATAL_ERROR');
+            const message = String(serverError.message || '未知严重错误');
+            const at = serverError.at ? `\n时间: ${serverError.at}` : '';
+            const noticeKey = `${code}|${message}|${serverError.at || ''}`;
+
+            if (STATE.serverErrorNoticeKey !== noticeKey) {
+                alert(`本地服务发生严重错误，抢课已终止。\n[${code}] ${message}${at}`);
+                STATE.serverErrorNoticeKey = noticeKey;
+            }
+
+            STATE.isGrabbing = false;
+            STATE.rps = Number(status?.rps || 0);
+            STATE.workers = Number(status?.workers || 0);
+            this.stopStatusPolling();
+            return true;
+        },
         async toggleCoursePause(lessonAssocRaw, pause) {
             const lessonAssoc = normalizeLessonAssoc(lessonAssocRaw);
             if (lessonAssoc === null) {
@@ -779,6 +808,7 @@
                 skipCaptcha: Boolean(STATE.skipCaptcha),
             };
 
+            STATE.serverErrorNoticeKey = '';
             await requestLocalApi('/start', 'POST', payload);
             STATE.isGrabbing = true;
             this.startStatusPolling();
@@ -809,9 +839,13 @@
         },
         async fetchStatusOnce() {
             const status = await requestLocalApi('/status', 'GET');
+            this.syncCoursesFromServer(status?.courses);
+            if (this.handleServerFatalError(status)) {
+                UI.render();
+                return;
+            }
             STATE.rps = Number(status?.rps || 0);
             STATE.workers = Number(status?.workers || 0);
-            this.syncCoursesFromServer(status?.courses);
             if (STATE.isGrabbing && status?.running === false) {
                 STATE.isGrabbing = false;
                 this.stopStatusPolling();
@@ -844,6 +878,9 @@
                 STATE.rps = Number(status?.rps || 0);
                 STATE.workers = Number(status?.workers || 0);
                 ExecutionEngine.syncCoursesFromServer(status?.courses);
+                if (ExecutionEngine.handleServerFatalError(status)) {
+                    STATE.isGrabbing = false;
+                }
                 if (STATE.isGrabbing) {
                     ExecutionEngine.startStatusPolling();
                 }

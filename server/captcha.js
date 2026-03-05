@@ -85,7 +85,15 @@ class CaptchaEngine {
       throw new Error('captcha loop isRunning function is required');
     }
 
+    let isCaptchaRequestInFlight = false;
+
     while (isRunning()) {
+      if (isCaptchaRequestInFlight) {
+        await sleep(intervalMs);
+        continue;
+      }
+
+      isCaptchaRequestInFlight = true;
       try {
         const randomImgPath = `/api/v1/student/course-select/getRandomImg?studentId=${encodeURIComponent(
           String(studentId),
@@ -134,6 +142,8 @@ class CaptchaEngine {
         } else {
           throw error;
         }
+      } finally {
+        isCaptchaRequestInFlight = false;
       }
     }
   }

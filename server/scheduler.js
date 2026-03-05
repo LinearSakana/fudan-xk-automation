@@ -9,6 +9,9 @@ const DEFAULT_CONCURRENCY = 2;
 const CAPTURE_WINDOW_MS = 1000;
 const NEGLECT_CAPTCHA_VERIFICATION_RESPONSE = true;
 const CAPTCHA_LOOP_INTERVAL_MS = 5;
+const WORKER_START_COURSE_WINDOW_MS = 1000;
+const WORKER_START_COURSE_GAP_MIN_MS = 100;
+const WORKER_START_INTRA_WINDOW_MS = 800;
 
 class Scheduler {
   constructor(options = {}) {
@@ -39,9 +42,13 @@ class Scheduler {
     this._job = null;
     this._requestTimestamps = [];
     this._rpsTimer = null;
-    this._captchaWaiters = [];
+    this._captchaCourseQueues = new Map();
+    this._captchaCourseOrder = [];
+    this._captchaCourseCursor = 0;
     this._captchaLoopPromise = null;
+    this._workerLaunchPromises = [];
     this._workerPromises = [];
+    this._fatalError = null;
   }
 
   getState() {
@@ -52,6 +59,7 @@ class Scheduler {
       rps: this.state.rps,
       workers: activeWorkers,
       courses,
+      error: this._fatalError ? { ...this._fatalError } : null,
     };
   }
 
@@ -59,6 +67,7 @@ class Scheduler {
     this._validatePayload(payload);
 
     await this.stop();
+    this._clearFatalError();
 
     const courses = this._normalizeCourses(payload.courses);
     const concurrency = Number(payload.concurrency || DEFAULT_CONCURRENCY);
@@ -71,6 +80,7 @@ class Scheduler {
           success: false,
           markedForRemoval: false,
           activeWorkers: 0,
+          pendingStarts: 0,
           workerSeq: 0,
         },
       ]),
@@ -92,7 +102,10 @@ class Scheduler {
     this.state.courseStates = courseStates;
     this.state.rps = 0;
     this._requestTimestamps = [];
-    this._captchaWaiters = [];
+    this._captchaCourseQueues = new Map();
+    this._captchaCourseOrder = [];
+    this._captchaCourseCursor = 0;
+    this._workerLaunchPromises = [];
 
     try {
       this._startRpsMeter();
@@ -102,7 +115,9 @@ class Scheduler {
           await this.captcha.loadRecords(this.captchaRecordsPath);
         } catch (error) {
           if (!this.captcha.hasRecords()) {
-            throw new Error(`captcha records unavailable: ${error.message}`);
+            const loadError = new Error(`captcha records unavailable: ${error.message}`);
+            loadError.fatalCode = 'CAPTCHA_RECORDS_UNAVAILABLE';
+            throw loadError;
           }
           this.logger.warn({ err: error }, 'failed to refresh captcha records, fallback to cached records');
         }
@@ -124,6 +139,7 @@ class Scheduler {
           })
           .catch((error) => {
             this.logger.error({ err: error }, 'captcha loop crashed');
+            this._markFatalAndStop('CAPTCHA_LOOP_CRASH', error);
           });
       }
 
@@ -139,15 +155,18 @@ class Scheduler {
         'scheduler started',
       );
     } catch (error) {
-      await this.stop();
+      const fatalCode = error?.fatalCode || 'SCHEDULER_START_FAILED';
+      this._setFatalError(fatalCode, error?.message || 'scheduler failed to start');
+      await this.stop({ preserveFatalError: true });
       throw error;
     }
   }
 
-  async stop() {
+  async stop(options = {}) {
+    const preserveFatalError = Boolean(options.preserveFatalError);
     const removedCourses = this._collectMarkedForRemovalCourses();
     if (!this.state.running && !this._job) {
-      this._resetRuntimeState();
+      this._resetRuntimeState({ preserveFatalError });
       return { removedCourses };
     }
 
@@ -165,6 +184,10 @@ class Scheduler {
 
     this._stopRpsMeter();
 
+    if (this._workerLaunchPromises.length) {
+      await Promise.race([Promise.allSettled(this._workerLaunchPromises), sleep(300)]);
+    }
+
     this.state.workers.forEach((worker) => {
       worker.active = false;
     });
@@ -174,13 +197,19 @@ class Scheduler {
 
     this._job = null;
     this._captchaLoopPromise = null;
+    this._workerLaunchPromises = [];
     this._workerPromises = [];
-    this._captchaWaiters = [];
+    this._captchaCourseQueues = new Map();
+    this._captchaCourseOrder = [];
+    this._captchaCourseCursor = 0;
     this._requestTimestamps = [];
     this.state.workers = [];
     this.state.courses = [];
     this.state.courseStates = new Map();
     this.state.rps = 0;
+    if (!preserveFatalError) {
+      this._clearFatalError();
+    }
 
     this.logger.info('scheduler stopped');
     return { removedCourses };
@@ -259,41 +288,111 @@ class Scheduler {
   _spawnWorkers(job) {
     this.state.workers = [];
     this._workerPromises = [];
+    this._workerLaunchPromises = [];
 
-    for (const lessonAssoc of job.courses) {
+    const runnableCourses = job.courses.filter((lessonAssoc) => {
       const courseState = job.courseStates.get(lessonAssoc);
-      if (!courseState || courseState.status !== 'running') continue;
-      this._spawnWorkersForCourse(job, lessonAssoc, job.concurrency);
+      return Boolean(courseState && courseState.status === 'running' && !courseState.success);
+    });
+
+    if (runnableCourses.length === 0) return;
+
+    const courseGapMs = this._computeCourseStartGapMs(runnableCourses.length);
+    const intraDelayMs = this._computeIntraCourseStartGapMs(job.concurrency);
+
+    for (let courseIndex = 0; courseIndex < runnableCourses.length; courseIndex += 1) {
+      const lessonAssoc = runnableCourses[courseIndex];
+      const baseDelayMs = courseGapMs * courseIndex;
+      this._spawnWorkersForCourse(job, lessonAssoc, job.concurrency, {
+        baseDelayMs,
+        intraDelayMs,
+      });
     }
   }
 
-  _spawnWorkersForCourse(job, lessonAssoc, count) {
+  _spawnWorkersForCourse(job, lessonAssoc, count, options = {}) {
     const courseState = job.courseStates.get(lessonAssoc);
     if (!courseState || courseState.success || courseState.status !== 'running') {
       return;
     }
 
-    for (let i = 0; i < count; i += 1) {
-      const worker = {
-        id: `${lessonAssoc}-${courseState.workerSeq}`,
-        lessonAssoc,
-        active: true,
-        counted: true,
-      };
-      courseState.workerSeq += 1;
-      courseState.activeWorkers += 1;
+    const baseDelayMs = Number(options.baseDelayMs || 0);
+    const intraDelayMs = Number(options.intraDelayMs || 0);
 
-      this.state.workers.push(worker);
-      const runPromise = this._runWorker(job, worker)
-        .catch((error) => {
-          if (this._isAbortError(error)) return;
-          this.logger.warn({ err: error, workerId: worker.id }, 'worker terminated with error');
-        })
-        .finally(() => {
-          this._onWorkerExit(worker);
-        });
-      this._workerPromises.push(runPromise);
+    for (let i = 0; i < count; i += 1) {
+      const delayMs = Math.max(0, Math.trunc(baseDelayMs + i * intraDelayMs));
+      this._scheduleWorkerLaunch(job, lessonAssoc, delayMs);
     }
+  }
+
+  _scheduleWorkerLaunch(job, lessonAssoc, delayMs) {
+    const courseState = job.courseStates.get(lessonAssoc);
+    if (!courseState || courseState.success || courseState.status !== 'running') {
+      return;
+    }
+
+    courseState.pendingStarts += 1;
+
+    const launchPromise = (async () => {
+      if (delayMs > 0) {
+        await sleep(delayMs);
+      }
+
+      if (!this._canLaunchWorker(job, lessonAssoc)) {
+        return;
+      }
+
+      this._launchWorker(job, lessonAssoc);
+    })()
+      .catch((error) => {
+        if (this._isAbortError(error)) return;
+        this.logger.debug({ err: error, lessonAssoc }, 'worker launch failed');
+      })
+      .finally(() => {
+        const state = job.courseStates.get(lessonAssoc);
+        if (state) {
+          state.pendingStarts = Math.max(0, state.pendingStarts - 1);
+        }
+      });
+
+    this._workerLaunchPromises.push(launchPromise);
+  }
+
+  _canLaunchWorker(job, lessonAssoc) {
+    if (!this.state.running || !this._job || this._job !== job) return false;
+    if (job.abortController.signal.aborted) return false;
+
+    const courseState = job.courseStates.get(lessonAssoc);
+    if (!courseState) return false;
+    if (courseState.success || courseState.status !== 'running') return false;
+    return true;
+  }
+
+  _launchWorker(job, lessonAssoc) {
+    const courseState = job.courseStates.get(lessonAssoc);
+    if (!courseState || courseState.success || courseState.status !== 'running') {
+      return;
+    }
+
+    const worker = {
+      id: `${lessonAssoc}-${courseState.workerSeq}`,
+      lessonAssoc,
+      active: true,
+      counted: true,
+    };
+    courseState.workerSeq += 1;
+    courseState.activeWorkers += 1;
+
+    this.state.workers.push(worker);
+    const runPromise = this._runWorker(job, worker)
+      .catch((error) => {
+        if (this._isAbortError(error)) return;
+        this.logger.warn({ err: error, workerId: worker.id }, 'worker terminated with error');
+      })
+      .finally(() => {
+        this._onWorkerExit(worker);
+      });
+    this._workerPromises.push(runPromise);
   }
 
   async _runWorker(job, worker) {
@@ -414,34 +513,95 @@ class Scheduler {
     }
 
     return new Promise((resolve) => {
-      this._captchaWaiters.push({ workerId, lessonAssoc, resolve });
+      this._enqueueCaptchaWaiter({ workerId, lessonAssoc, resolve });
     });
   }
 
   _grantOneCaptchaPermit() {
-    if (!this._captchaWaiters.length) return;
-    const waiter = this._captchaWaiters.shift();
-    waiter.resolve(true);
+    while (this._captchaCourseOrder.length > 0) {
+      if (this._captchaCourseCursor >= this._captchaCourseOrder.length) {
+        this._captchaCourseCursor = 0;
+      }
+
+      const lessonAssoc = this._captchaCourseOrder[this._captchaCourseCursor];
+      const queue = this._captchaCourseQueues.get(lessonAssoc);
+
+      if (!queue || queue.length === 0) {
+        this._removeCaptchaCourseQueueAt(this._captchaCourseCursor);
+        continue;
+      }
+
+      const waiter = queue.shift();
+      if (queue.length === 0) {
+        this._removeCaptchaCourseQueueAt(this._captchaCourseCursor);
+      } else {
+        this._captchaCourseCursor = (this._captchaCourseCursor + 1) % this._captchaCourseOrder.length;
+      }
+
+      waiter.resolve(true);
+      return;
+    }
   }
 
   _resolveCaptchaWaitersByCourse(lessonAssoc, value) {
-    if (!this._captchaWaiters.length) return;
-    const remaining = [];
-    for (const waiter of this._captchaWaiters) {
-      if (waiter.lessonAssoc === lessonAssoc) {
-        waiter.resolve(value);
-      } else {
-        remaining.push(waiter);
+    const key = Number(lessonAssoc);
+    const queue = this._captchaCourseQueues.get(key);
+    if (!queue || queue.length === 0) return;
+
+    for (const waiter of queue) {
+      waiter.resolve(value);
+    }
+
+    this._captchaCourseQueues.delete(key);
+    const index = this._captchaCourseOrder.indexOf(key);
+    if (index >= 0) {
+      this._removeCaptchaCourseQueueAt(index);
+    }
+  }
+
+  _enqueueCaptchaWaiter(waiter) {
+    const key = Number(waiter.lessonAssoc);
+    let queue = this._captchaCourseQueues.get(key);
+    if (!queue) {
+      queue = [];
+      this._captchaCourseQueues.set(key, queue);
+      this._captchaCourseOrder.push(key);
+      if (this._captchaCourseOrder.length === 1) {
+        this._captchaCourseCursor = 0;
       }
     }
-    this._captchaWaiters = remaining;
+    queue.push(waiter);
+  }
+
+  _removeCaptchaCourseQueueAt(index) {
+    if (index < 0 || index >= this._captchaCourseOrder.length) return;
+    const [lessonAssoc] = this._captchaCourseOrder.splice(index, 1);
+    if (lessonAssoc !== undefined) {
+      this._captchaCourseQueues.delete(lessonAssoc);
+    }
+
+    if (this._captchaCourseOrder.length === 0) {
+      this._captchaCourseCursor = 0;
+      return;
+    }
+
+    if (index < this._captchaCourseCursor) {
+      this._captchaCourseCursor -= 1;
+    }
+    if (this._captchaCourseCursor >= this._captchaCourseOrder.length) {
+      this._captchaCourseCursor = 0;
+    }
   }
 
   _resolveAllCaptchaWaiters() {
-    while (this._captchaWaiters.length) {
-      const waiter = this._captchaWaiters.shift();
-      waiter.resolve(false);
+    for (const queue of this._captchaCourseQueues.values()) {
+      for (const waiter of queue) {
+        waiter.resolve(false);
+      }
     }
+    this._captchaCourseQueues = new Map();
+    this._captchaCourseOrder = [];
+    this._captchaCourseCursor = 0;
   }
 
   async _apiRequest(job, method, path, body) {
@@ -507,11 +667,15 @@ class Scheduler {
     }
   }
 
-  _resetRuntimeState() {
+  _resetRuntimeState(options = {}) {
+    const preserveFatalError = Boolean(options.preserveFatalError);
     this._stopRpsMeter();
     this._job = null;
-    this._captchaWaiters = [];
+    this._captchaCourseQueues = new Map();
+    this._captchaCourseOrder = [];
+    this._captchaCourseCursor = 0;
     this._captchaLoopPromise = null;
+    this._workerLaunchPromises = [];
     this._workerPromises = [];
     this._requestTimestamps = [];
     this.state = {
@@ -521,6 +685,9 @@ class Scheduler {
       courseStates: new Map(),
       rps: 0,
     };
+    if (!preserveFatalError) {
+      this._clearFatalError();
+    }
   }
 
   _snapshotCourses() {
@@ -583,13 +750,48 @@ class Scheduler {
     if (courseState.status === 'success') {
       return this.getState();
     }
-    if (courseState.status === 'running' && courseState.activeWorkers > 0) {
+    if (courseState.status === 'running' && (courseState.activeWorkers > 0 || courseState.pendingStarts > 0)) {
       return this.getState();
     }
 
     courseState.status = 'running';
-    this._spawnWorkersForCourse(this._job, lessonAssoc, this._job.concurrency);
+    this._spawnWorkersForCourse(this._job, lessonAssoc, this._job.concurrency, {
+      baseDelayMs: 0,
+      intraDelayMs: this._computeIntraCourseStartGapMs(this._job.concurrency),
+    });
     return this.getState();
+  }
+
+  _computeCourseStartGapMs(courseCount) {
+    const normalizedCount = Math.max(1, Number(courseCount) || 1);
+    return Math.max(WORKER_START_COURSE_GAP_MIN_MS, Math.floor(WORKER_START_COURSE_WINDOW_MS / normalizedCount));
+  }
+
+  _computeIntraCourseStartGapMs(concurrency) {
+    const normalizedConcurrency = Math.max(1, Number(concurrency) || 1);
+    return Math.floor(WORKER_START_INTRA_WINDOW_MS / normalizedConcurrency);
+  }
+
+  _setFatalError(code, message) {
+    this._fatalError = {
+      code: String(code || 'UNKNOWN_FATAL_ERROR'),
+      message: String(message || 'unknown fatal error'),
+      at: new Date().toISOString(),
+    };
+  }
+
+  _clearFatalError() {
+    this._fatalError = null;
+  }
+
+  _markFatalAndStop(code, error) {
+    const message = error?.message ? String(error.message) : String(error || 'unknown fatal error');
+    this._setFatalError(code, message);
+    if (!this.state.running && !this._job) return;
+
+    this.stop({ preserveFatalError: true }).catch((stopError) => {
+      this.logger.error({ err: stopError }, 'failed to stop scheduler after fatal error');
+    });
   }
 
   _normalizeLessonAssocForControl(raw) {
