@@ -17,7 +17,7 @@
 
     // --- 全局配置 ---
     const SERVER_BASE_URL = 'http://127.0.0.1:30522';
-    const STORAGE_KEY = 'fudan_grabber_split_state';
+    const STORAGE_KEY = 'fudan_course_grabber_state';
     const STATE = {
         courses: [], // 意向课程列表 { lessonAssoc: number, status: 'pending' | 'success', isPaused?: boolean, courseName?: string, teacherNames?: string[], schedule?: object[] }
         studentId: '',
