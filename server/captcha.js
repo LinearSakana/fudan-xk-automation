@@ -135,8 +135,6 @@ class CaptchaEngine {
           throw error;
         }
       }
-
-      await sleep(intervalMs);
     }
   }
 
