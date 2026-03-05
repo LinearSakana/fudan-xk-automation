@@ -105,7 +105,7 @@
             panel.id = 'grabber-panel';
             panel.innerHTML = `
                 <div class="grabber-header">
-                    <span class="grabber-title">抢课助手（Node拆分）</span>
+                    <span class="grabber-title">选课助手</span>
                     <span id="header-student-id" class="header-student-id" title="StudentID" style="display: none;"></span>
                 </div>
                 <div class="grabber-body">
@@ -116,12 +116,12 @@
                             跳过验证
                         </label>
                         <div class="rps-display" title="本地服务状态">
-                            RPS: <span id="rps-value">0</span> | W: <span id="workers-value">0</span>
+                            RPS: <span id="rps-value">0</span> | Workers: <span id="workers-value">0</span>
                         </div>
                     </div>
                     <div class="grabber-slider-group">
                         <label for="concurrency-slider" id="concurrency-num">并发数</label>
-                        <input type="range" id="concurrency-slider" min="1" max="30" value="2">
+                        <input type="range" id="concurrency-slider" min="1" max="10" value="2">
                         <span id="concurrency-value" class="badge">2</span>
                     </div>
                     <ul id="course-list"></ul>
