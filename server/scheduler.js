@@ -7,6 +7,8 @@ const { CaptchaEngine } = require('./captcha');
 const DEFAULT_BASE_URL = 'https://xk.fudan.edu.cn';
 const DEFAULT_CONCURRENCY = 2;
 const CAPTURE_WINDOW_MS = 1000;
+const NEGLECT_CAPTCHA_VERIFICATION_RESPONSE = true;
+const CAPTCHA_LOOP_INTERVAL_MS = 5;
 
 class Scheduler {
   constructor(options = {}) {
@@ -100,6 +102,8 @@ class Scheduler {
                 this.logger.debug({ err: error }, 'captcha loop iteration failed');
               }
             },
+            intervalMs: CAPTCHA_LOOP_INTERVAL_MS,
+            neglectVerificationResponse: NEGLECT_CAPTCHA_VERIFICATION_RESPONSE,
           })
           .catch((error) => {
             this.logger.error({ err: error }, 'captcha loop crashed');

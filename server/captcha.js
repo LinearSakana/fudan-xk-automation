@@ -72,6 +72,7 @@ class CaptchaEngine {
       onVerified,
       onIterationError,
       intervalMs = 5,
+      neglectVerificationResponse = true,
     } = options;
 
     if (!studentId || !turnId) {
@@ -108,6 +109,19 @@ class CaptchaEngine {
         const rstImgPath = `/api/v1/student/course-select/rstImgSwipe?moveEndX=${encodeURIComponent(
           moveEndX,
         )}&wbili=1&studentId=${encodeURIComponent(String(studentId))}&turnId=${encodeURIComponent(String(turnId))}`;
+
+        if (neglectVerificationResponse) {
+          request('GET', rstImgPath).catch((error) => {
+            if (typeof onIterationError === 'function') {
+              onIterationError(error);
+            }
+          });
+          if (typeof onVerified === 'function') {
+            onVerified({ imgIndex, posIndex, moveEndX });
+          }
+          await sleep(intervalMs);
+          continue;
+        }
 
         const rstParsed = await request('GET', rstImgPath);
         const verified = rstParsed?.success === true || rstParsed?.data?.success === true;
