@@ -70,7 +70,47 @@
         return lessonAssoc > 0 ? lessonAssoc : null;
     }
 
-    function getCoursePayloadForServer() {
+    function normalizeLessonInfo(lesson) {
+            const teacherNames = uniqueNonEmpty((lesson.teachers || []).map(t => t.nameZh || t.nameEn));
+            const scheduleItems = [];
+            (lesson.scheduleGroups || []).forEach((group) => {
+                (group.schedules || []).forEach((schedule) => {
+                    scheduleItems.push({
+                        weekdayLabel: WEEKDAY_LABELS[schedule.weekday] || '',
+                        startUnit: schedule.startUnit ?? null,
+                        endUnit: schedule.endUnit ?? null,
+                        weekRange: {
+                            startWeek: schedule.startWeek ?? lesson.scheduleStartWeek ?? null,
+                            endWeek: schedule.endWeek ?? lesson.scheduleEndWeek ?? null,
+                        },
+                    });
+                });
+            });
+            const scheduleSummary = uniqueNonEmpty(scheduleItems.map((item) => {
+                const unitText = item.startUnit !== null && item.endUnit !== null ? `${item.startUnit}~${item.endUnit}节` : '未知节次';
+                const weekText = item.weekRange.startWeek !== null && item.weekRange.endWeek !== null ? `${item.weekRange.startWeek}~${item.weekRange.endWeek}周` : '未知周次';
+                return `${weekText} ${item.weekdayLabel || '未知星期'} ${unitText}`;
+            }));
+            return {
+                lessonAssoc: lesson.id,
+                lessonCode: lesson.code || null,
+                courseCode: lesson.course?.code || null,
+                courseName: lesson.course?.nameZh || lesson.nameZh || lesson.course?.nameEn || lesson.nameEn || `Lesson ${lesson.id}`,
+                teacherNames,
+                teacherText: teacherNames.join('、'),
+                campus: lesson.campus?.nameZh || lesson.campus?.nameEn || null,
+                credits: lesson.course?.credits ?? null,
+                limitCount: lesson.limitCount ?? null,
+                selectionRemark: lesson.selectionRemark || null,
+                weekDays: Array.isArray(lesson.weekDays) ? lesson.weekDays : [],
+                scheduleStartWeek: lesson.scheduleStartWeek ?? null,
+                scheduleEndWeek: lesson.scheduleEndWeek ?? null,
+                schedule: scheduleItems,
+                scheduleSummary,
+            };
+        }
+
+    function getCoursePayload() {
         const seen = new Set();
         const courses = [];
         STATE.courses.forEach((course) => {
@@ -85,7 +125,7 @@
         return courses;
     }
 
-    async function requestLocalApi(path, method = 'GET', payload = null) {
+    async function requestApi(path, method = 'GET', payload = null) {
         const response = await fetch(`${SERVER_BASE_URL}${path}`, {
             method,
             headers: {'Content-Type': 'application/json'},
@@ -618,46 +658,7 @@
     };
     // --- 抢课执行引擎 ---
     const ExecutionEngine = {
-        normalizeLessonInfo(lesson) {
-            const teacherNames = uniqueNonEmpty((lesson.teachers || []).map(t => t.nameZh || t.nameEn));
-            const scheduleItems = [];
-            (lesson.scheduleGroups || []).forEach((group) => {
-                (group.schedules || []).forEach((schedule) => {
-                    scheduleItems.push({
-                        weekdayLabel: WEEKDAY_LABELS[schedule.weekday] || '',
-                        startUnit: schedule.startUnit ?? null,
-                        endUnit: schedule.endUnit ?? null,
-                        weekRange: {
-                            startWeek: schedule.startWeek ?? lesson.scheduleStartWeek ?? null,
-                            endWeek: schedule.endWeek ?? lesson.scheduleEndWeek ?? null,
-                        },
-                    });
-                });
-            });
-            const scheduleSummary = uniqueNonEmpty(scheduleItems.map((item) => {
-                const unitText = item.startUnit !== null && item.endUnit !== null ? `${item.startUnit}~${item.endUnit}节` : '未知节次';
-                const weekText = item.weekRange.startWeek !== null && item.weekRange.endWeek !== null ? `${item.weekRange.startWeek}~${item.weekRange.endWeek}周` : '未知周次';
-                return `${weekText} ${item.weekdayLabel || '未知星期'} ${unitText}`;
-            }));
-            return {
-                lessonAssoc: lesson.id,
-                lessonCode: lesson.code || null,
-                courseCode: lesson.course?.code || null,
-                courseName: lesson.course?.nameZh || lesson.nameZh || lesson.course?.nameEn || lesson.nameEn || `Lesson ${lesson.id}`,
-                teacherNames,
-                teacherText: teacherNames.join('、'),
-                campus: lesson.campus?.nameZh || lesson.campus?.nameEn || null,
-                credits: lesson.course?.credits ?? null,
-                limitCount: lesson.limitCount ?? null,
-                selectionRemark: lesson.selectionRemark || null,
-                weekDays: Array.isArray(lesson.weekDays) ? lesson.weekDays : [],
-                scheduleStartWeek: lesson.scheduleStartWeek ?? null,
-                scheduleEndWeek: lesson.scheduleEndWeek ?? null,
-                schedule: scheduleItems,
-                scheduleSummary,
-            };
-        },
-        async queryLessonInfosByAssocs(lessonAssocs) {
+        async queryLessonInfo(lessonAssocs) {
             const normalizedIds = uniqueNonEmpty((lessonAssocs || []).map(id => Number(id))).map(id => Number(id)).filter(id => Number.isFinite(id) && id > 0);
             if (normalizedIds.length === 0) return [];
             if (!STATE.studentId || !STATE.turnId || Object.keys(STATE.headers).length === 0) return [];
@@ -681,10 +682,10 @@
             const parsed = await response.json().catch(() => ({}));
             const lessons = parsed?.data?.lessons;
             if (parsed.result !== 0 || !Array.isArray(lessons)) return [];
-            return lessons.map(lesson => this.normalizeLessonInfo(lesson));
+            return lessons.map(lesson => normalizeLessonInfo(lesson));
         },
         async syncCourseDetails(lessonAssocs) {
-            const infos = await this.queryLessonInfosByAssocs(lessonAssocs);
+            const infos = await this.queryLessonInfo(lessonAssocs);
             if (infos.length === 0) return [];
             const infoByLessonAssoc = new Map(infos.map(info => [info.lessonAssoc, info]));
             let updated = false;
@@ -742,7 +743,7 @@
                 Persistence.save();
             }
         },
-        handleServerFatalError(status) {
+        handleServerError(status) {
             const serverError = status?.error;
             if (!serverError || typeof serverError !== 'object') return false;
 
@@ -762,15 +763,14 @@
             this.stopStatusPolling();
             return true;
         },
-        async toggleCoursePause(lessonAssocRaw, pause) {
-            const lessonAssoc = normalizeLessonAssoc(lessonAssocRaw);
-            if (lessonAssoc === null) {
+        async toggleCoursePause(lessonAssoc, pause) {
+            if (normalizeLessonAssoc(lessonAssoc) === null) {
                 throw new Error('lessonAssoc 无效');
             }
             if (!STATE.isGrabbing) return;
 
             const path = pause ? '/course/pause' : '/course/resume';
-            const status = await requestLocalApi(path, 'POST', {lessonAssoc});
+            const status = await requestApi(path, 'POST', {lessonAssoc: normalizeLessonAssoc(lessonAssoc)});
             this.syncCoursesFromServer(status?.courses);
             STATE.rps = Number(status?.rps || 0);
             STATE.workers = Number(status?.workers || 0);
@@ -790,7 +790,7 @@
             STATE.toBeRemoved.clear();
             STATE.courses.forEach(c => { c.status = 'pending'; });
             await this.syncCourseDetails(STATE.courses.map(c => c.lessonAssoc)).catch(() => {});
-            const courses = getCoursePayloadForServer();
+            const courses = getCoursePayload();
             const runnableCount = courses.filter(course => !course.isPaused).length;
             if (runnableCount === 0) {
                 alert('没有可执行课程（可能全部已暂停），请检查课程列表');
@@ -809,13 +809,13 @@
             };
 
             STATE.serverErrorNoticeKey = '';
-            await requestLocalApi('/start', 'POST', payload);
+            await requestApi('/start', 'POST', payload);
             STATE.isGrabbing = true;
             this.startStatusPolling();
             UI.render();
         },
         async stop() {
-            const stopResult = await requestLocalApi('/stop', 'POST', {}).catch(() => ({}));
+            const stopResult = await requestApi('/stop', 'POST', {}).catch(() => ({}));
             STATE.isGrabbing = false;
             STATE.rps = 0;
             STATE.workers = 0;
@@ -837,10 +837,10 @@
             this.stopStatusPolling();
             UI.render();
         },
-        async fetchStatusOnce() {
-            const status = await requestLocalApi('/status', 'GET');
+        async fetchServerStatus() {
+            const status = await requestApi('/status', 'GET');
             this.syncCoursesFromServer(status?.courses);
-            if (this.handleServerFatalError(status)) {
+            if (this.handleServerError(status)) {
                 UI.render();
                 return;
             }
@@ -854,9 +854,9 @@
         },
         startStatusPolling() {
             this.stopStatusPolling();
-            this.fetchStatusOnce().catch(() => {});
+            this.fetchServerStatus().catch(() => {});
             STATE.statusIntervalId = setInterval(() => {
-                this.fetchStatusOnce().catch(() => {});
+                this.fetchServerStatus().catch(() => {});
             }, 1000);
         },
         stopStatusPolling() {
@@ -873,12 +873,12 @@
         const mountUi = () => {
             UI.createPanel();
             UI.render();
-            requestLocalApi('/status', 'GET').then((status) => {
+            requestApi('/status', 'GET').then((status) => {
                 STATE.isGrabbing = Boolean(status?.running);
                 STATE.rps = Number(status?.rps || 0);
                 STATE.workers = Number(status?.workers || 0);
                 ExecutionEngine.syncCoursesFromServer(status?.courses);
-                if (ExecutionEngine.handleServerFatalError(status)) {
+                if (ExecutionEngine.handleServerError(status)) {
                     STATE.isGrabbing = false;
                 }
                 if (STATE.isGrabbing) {
