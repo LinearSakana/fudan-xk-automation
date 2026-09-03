@@ -71,44 +71,44 @@
     }
 
     function normalizeLessonInfo(lesson) {
-            const teacherNames = uniqueNonEmpty((lesson.teachers || []).map(t => t.nameZh || t.nameEn));
-            const scheduleItems = [];
-            (lesson.scheduleGroups || []).forEach((group) => {
-                (group.schedules || []).forEach((schedule) => {
-                    scheduleItems.push({
-                        weekdayLabel: WEEKDAY_LABELS[schedule.weekday] || '',
-                        startUnit: schedule.startUnit ?? null,
-                        endUnit: schedule.endUnit ?? null,
-                        weekRange: {
-                            startWeek: schedule.startWeek ?? lesson.scheduleStartWeek ?? null,
-                            endWeek: schedule.endWeek ?? lesson.scheduleEndWeek ?? null,
-                        },
-                    });
+        const teacherNames = uniqueNonEmpty((lesson.teachers || []).map(t => t.nameZh || t.nameEn));
+        const scheduleItems = [];
+        (lesson.scheduleGroups || []).forEach((group) => {
+            (group.schedules || []).forEach((schedule) => {
+                scheduleItems.push({
+                    weekdayLabel: WEEKDAY_LABELS[schedule.weekday] || '',
+                    startUnit: schedule.startUnit ?? null,
+                    endUnit: schedule.endUnit ?? null,
+                    weekRange: {
+                        startWeek: schedule.startWeek ?? lesson.scheduleStartWeek ?? null,
+                        endWeek: schedule.endWeek ?? lesson.scheduleEndWeek ?? null,
+                    },
                 });
             });
-            const scheduleSummary = uniqueNonEmpty(scheduleItems.map((item) => {
-                const unitText = item.startUnit !== null && item.endUnit !== null ? `${item.startUnit}~${item.endUnit}节` : '未知节次';
-                const weekText = item.weekRange.startWeek !== null && item.weekRange.endWeek !== null ? `${item.weekRange.startWeek}~${item.weekRange.endWeek}周` : '未知周次';
-                return `${weekText} ${item.weekdayLabel || '未知星期'} ${unitText}`;
-            }));
-            return {
-                lessonAssoc: lesson.id,
-                lessonCode: lesson.code || null,
-                courseCode: lesson.course?.code || null,
-                courseName: lesson.course?.nameZh || lesson.nameZh || lesson.course?.nameEn || lesson.nameEn || `Lesson ${lesson.id}`,
-                teacherNames,
-                teacherText: teacherNames.join('、'),
-                campus: lesson.campus?.nameZh || lesson.campus?.nameEn || null,
-                credits: lesson.course?.credits ?? null,
-                limitCount: lesson.limitCount ?? null,
-                selectionRemark: lesson.selectionRemark || null,
-                weekDays: Array.isArray(lesson.weekDays) ? lesson.weekDays : [],
-                scheduleStartWeek: lesson.scheduleStartWeek ?? null,
-                scheduleEndWeek: lesson.scheduleEndWeek ?? null,
-                schedule: scheduleItems,
-                scheduleSummary,
-            };
-        }
+        });
+        const scheduleSummary = uniqueNonEmpty(scheduleItems.map((item) => {
+            const unitText = item.startUnit !== null && item.endUnit !== null ? `${item.startUnit}~${item.endUnit}节` : '未知节次';
+            const weekText = item.weekRange.startWeek !== null && item.weekRange.endWeek !== null ? `${item.weekRange.startWeek}~${item.weekRange.endWeek}周` : '未知周次';
+            return `${weekText} ${item.weekdayLabel || '未知星期'} ${unitText}`;
+        }));
+        return {
+            lessonAssoc: lesson.id,
+            lessonCode: lesson.code || null,
+            courseCode: lesson.course?.code || null,
+            courseName: lesson.course?.nameZh || lesson.nameZh || lesson.course?.nameEn || lesson.nameEn || `Lesson ${lesson.id}`,
+            teacherNames,
+            teacherText: teacherNames.join('、'),
+            campus: lesson.campus?.nameZh || lesson.campus?.nameEn || null,
+            credits: lesson.course?.credits ?? null,
+            limitCount: lesson.limitCount ?? null,
+            selectionRemark: lesson.selectionRemark || null,
+            weekDays: Array.isArray(lesson.weekDays) ? lesson.weekDays : [],
+            scheduleStartWeek: lesson.scheduleStartWeek ?? null,
+            scheduleEndWeek: lesson.scheduleEndWeek ?? null,
+            schedule: scheduleItems,
+            scheduleSummary,
+        };
+    }
 
     function getCoursePayload() {
         const seen = new Set();
@@ -788,8 +788,11 @@
 
             STATE.concurrency = normalizeConcurrency(STATE.concurrency);
             STATE.toBeRemoved.clear();
-            STATE.courses.forEach(c => { c.status = 'pending'; });
-            await this.syncCourseDetails(STATE.courses.map(c => c.lessonAssoc)).catch(() => {});
+            STATE.courses.forEach(c => {
+                c.status = 'pending';
+            });
+            await this.syncCourseDetails(STATE.courses.map(c => c.lessonAssoc)).catch(() => {
+            });
             const courses = getCoursePayload();
             const runnableCount = courses.filter(course => !course.isPaused).length;
             if (runnableCount === 0) {
@@ -854,9 +857,11 @@
         },
         startStatusPolling() {
             this.stopStatusPolling();
-            this.fetchServerStatus().catch(() => {});
+            this.fetchServerStatus().catch(() => {
+            });
             STATE.statusIntervalId = setInterval(() => {
-                this.fetchServerStatus().catch(() => {});
+                this.fetchServerStatus().catch(() => {
+                });
             }, 1000);
         },
         stopStatusPolling() {
@@ -885,7 +890,8 @@
                     ExecutionEngine.startStatusPolling();
                 }
                 UI.render();
-            }).catch(() => {});
+            }).catch(() => {
+            });
         };
         if (document.readyState === 'loading') {
             document.addEventListener('DOMContentLoaded', mountUi);
