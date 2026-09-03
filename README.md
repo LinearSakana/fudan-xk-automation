@@ -28,3 +28,13 @@ The server listens on `http://127.0.0.1:30522` by default.
 | `GET` | `/status` | Get the current scheduler status |
 | `POST` | `/course/pause` | Pause a specific course |
 | `POST` | `/course/resume` | Resume a specific course |
+
+### Captcha
+
+Captcha solving is lookup-based: `(imgIndex, posIndex) → moveEndX`.
+
+Records are fetched from the maintainer's personal server by default:
+
+`https://tempfile.char.moe/course-grabber/FudanCourseGrabber/captchaRecords/`
+
+Each `<imgIndex>.json` maps `posIndex` to `moveEndX`. Set `CAPTCHA_RECORDS_PATH` to use local records instead. **Availability of the default source is not guaranteed.**
