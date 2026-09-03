@@ -1,4 +1,5 @@
 # fudan-xk-automation
+[![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0) [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](https://makeapullrequest.com)
 >本项目仅用于研究 **浏览器自动化与并发调度技术** 。  
 >作者**绝不支持**利用本工具进行大规模抢课、影响他人正常选课的行为。
 
