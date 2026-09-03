@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         复旦选课助手
-// @namespace    https://github.com/LinearSakana/fudan-xk-grabber
+// @namespace    https://github.com/LinearSakana/fudan-xk-automation
 // @version      0.1.0
 // @description  复旦大学本科生选课助手，使用前请确保已启动本地 Server
 // @author       LinearSakana
