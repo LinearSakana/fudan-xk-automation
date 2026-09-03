@@ -18,6 +18,7 @@
     // --- 全局配置 ---
     const SERVER_BASE_URL = 'http://127.0.0.1:30522';
     const STORAGE_KEY = 'fudan_course_grabber_state';
+    const FIRST_RUN_NOTICE_KEY = 'first_run_notice_v1';
     const STATE = {
         courses: [], // 意向课程列表 { lessonAssoc: number, status: 'pending' | 'success', isPaused?: boolean, courseName?: string, teacherNames?: string[], schedule?: object[] }
         studentId: '',
@@ -136,6 +137,88 @@
             throw new Error(parsed.error || `HTTP ${response.status}`);
         }
         return parsed;
+    }
+
+    function showFirstRunNotice() {
+        if (localStorage.getItem(FIRST_RUN_NOTICE_KEY)) return;
+
+        const overlay = document.createElement('div');
+        overlay.id = 'grabber-first-run-notice';
+
+        overlay.innerHTML = `
+        <div style="
+            position: fixed;
+            inset: 0;
+            z-index: 2147483647;
+            background: rgba(0, 0, 0, 0.45);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+            box-sizing: border-box;
+        ">
+            <div style="
+                width: 460px;
+                max-width: 100%;
+                background: #fff;
+                color: #2d3748;
+                border-radius: 16px;
+                padding: 24px;
+                box-shadow: 0 20px 60px rgba(0,0,0,.25);
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI',
+                             Roboto, Helvetica, Arial, sans-serif;
+            ">
+                <div style="
+                    font-size: 20px;
+                    font-weight: 600;
+                    margin-bottom: 14px;
+                ">
+                    欢迎使用复旦选课助手
+                </div>
+
+                <div style="
+                    font-size: 14px;
+                    line-height: 1.7;
+                    color: #4a5568;
+                ">
+                    <p>初次见面，先打起精神确认这两项 (｀・ω・´)：</p>
+
+                    <ol style="padding-left: 22px;">
+                        <li>本地 Server 已经在乖乖运行了吗？</li>
+                        <li>Server 地址对不对？（默认 <code>127.0.0.1:30522</code> ）</li>
+                    </ol>
+
+                    <p>
+                        待会进入选课页面后，记得先<b>手动点一次选课</b>哦~
+                    </p>
+                </div>
+
+                <button id="grabber-first-run-confirm" style="
+                    width: 100%;
+                    margin-top: 16px;
+                    padding: 10px 16px;
+                    border: none;
+                    border-radius: 9px;
+                    background: #3182ce;
+                    color: #fff;
+                    font-size: 14px;
+                    font-weight: 600;
+                    cursor: pointer;
+                ">
+                    承知！(・ω・)ゞ
+                </button>
+            </div>
+        </div>
+    `;
+
+        document.body.appendChild(overlay);
+
+        document
+            .getElementById('grabber-first-run-confirm')
+            .addEventListener('click', () => {
+                localStorage.setItem(FIRST_RUN_NOTICE_KEY, '1');
+                overlay.remove();
+            });
     }
 
     // --- UI 模块 ---
@@ -878,6 +961,7 @@
         const mountUi = () => {
             UI.createPanel();
             UI.render();
+            showFirstRunNotice();
             requestApi('/status', 'GET').then((status) => {
                 STATE.isGrabbing = Boolean(status?.running);
                 STATE.rps = Number(status?.rps || 0);
