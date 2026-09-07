@@ -32,6 +32,7 @@
         rps: 0,
         workers: 0,
         statusIntervalId: null,
+        selectedCoursesIntervalId: null,
         toBeRemoved: new Set(),
         serverErrorNoticeKey: '',
         hasFallbackCourse: 0,
@@ -78,9 +79,15 @@
         (lesson.scheduleGroups || []).forEach((group) => {
             (group.schedules || []).forEach((schedule) => {
                 scheduleItems.push({
+                    scheduleId: schedule.id ?? null,
+                    scheduleGroupId: schedule.scheduleGroupId ?? group.id ?? null,
                     weekdayLabel: WEEKDAY_LABELS[schedule.weekday] || '',
+                    weekday: schedule.weekday ?? null,
                     startUnit: schedule.startUnit ?? null,
                     endUnit: schedule.endUnit ?? null,
+                    startTime: schedule.startTime ?? null,
+                    endTime: schedule.endTime ?? schedule.entTime ?? null,
+                    dateTimePlace: group.dateTimePlace?.text || group.dateTimePlace?.textZh || group.dateTimePlace?.textEn || null,
                     weekRange: {
                         startWeek: schedule.startWeek ?? lesson.scheduleStartWeek ?? null,
                         endWeek: schedule.endWeek ?? lesson.scheduleEndWeek ?? null,
@@ -96,14 +103,32 @@
         return {
             lessonAssoc: lesson.id,
             lessonCode: lesson.code || null,
+            lessonNameZh: lesson.nameZh || null,
+            lessonNameEn: lesson.nameEn || null,
+            courseId: lesson.course?.id ?? null,
             courseCode: lesson.course?.code || null,
+            courseNameZh: lesson.course?.nameZh || null,
+            courseNameEn: lesson.course?.nameEn || null,
             courseName: lesson.course?.nameZh || lesson.nameZh || lesson.course?.nameEn || lesson.nameEn || `Lesson ${lesson.id}`,
+            teachers: (lesson.teachers || []).map(teacher => ({
+                id: teacher.id ?? null,
+                nameZh: teacher.nameZh || null,
+                nameEn: teacher.nameEn || null,
+            })),
             teacherNames,
             teacherText: teacherNames.join('、'),
             campus: lesson.campus?.nameZh || lesson.campus?.nameEn || null,
             credits: lesson.course?.credits ?? null,
             limitCount: lesson.limitCount ?? null,
             selectionRemark: lesson.selectionRemark || null,
+            dateTimePlace: lesson.dateTimePlace?.text || lesson.dateTimePlace?.textZh || lesson.dateTimePlace?.textEn || null,
+            examDate: lesson.examDate || null,
+            totalPeriod: lesson.totalPeriod ?? null,
+            department: lesson.course?.department || null,
+            openDepartment: lesson.openDepartment || null,
+            courseTableType: lesson.course?.courseTableType || null,
+            examMode: lesson.examMode || null,
+            teachLang: lesson.teachLang || null,
             weekDays: Array.isArray(lesson.weekDays) ? lesson.weekDays : [],
             scheduleStartWeek: lesson.scheduleStartWeek ?? null,
             scheduleEndWeek: lesson.scheduleEndWeek ?? null,
@@ -820,6 +845,50 @@
             }
             return infos;
         },
+        async querySelectedCourses() {
+            if (!STATE.studentId || !STATE.turnId || Object.keys(STATE.headers).length === 0) return [];
+            const queryUrl = `/api/v1/student/course-select/query-lesson/${encodeURIComponent(STATE.turnId)}/${encodeURIComponent(STATE.studentId)}`;
+            const response = await fetch(queryUrl, {headers: {...STATE.headers}});
+            const parsed = await response.json().catch(() => ({}));
+            if (!response.ok || parsed?.result !== 0 || !Array.isArray(parsed?.data)) {
+                throw new Error(parsed?.message || '已选课程响应格式无效');
+            }
+            return parsed.data.map(lesson => ({
+                ...normalizeLessonInfo(lesson),
+                status: 'success',
+                isPaused: true,
+                selectedConfirmed: true,
+            }));
+        },
+        async syncActuallySelectedCourses() {
+            if (!STATE.isGrabbing || this.isSelectedCoursesSyncing) return;
+            this.isSelectedCoursesSyncing = true;
+            try {
+                const selectedCourses = await this.querySelectedCourses();
+                const selectedById = new Map(selectedCourses.map(course => [course.lessonAssoc, course]));
+                const pausedIds = new Set();
+                for (const course of STATE.courses) {
+                    if (course.status === 'success' || !selectedById.has(course.lessonAssoc)) continue;
+                    try {
+                        await requestApi('/course/pause', 'POST', {lessonAssoc: course.lessonAssoc});
+                        pausedIds.add(course.lessonAssoc);
+                    } catch (error) {
+                        console.warn(`[抢课助手] 自动暂停已选课程 ${course.lessonAssoc} 失败:`, error.message || error);
+                    }
+                }
+                if (!STATE.isGrabbing || pausedIds.size === 0) return;
+
+                STATE.courses = STATE.courses.map(course => {
+                    if (!pausedIds.has(course.lessonAssoc)) return course;
+                    STATE.toBeRemoved.add(course.lessonAssoc);
+                    return {...course, ...selectedById.get(course.lessonAssoc)};
+                });
+                Persistence.save();
+                UI.render();
+            } finally {
+                this.isSelectedCoursesSyncing = false;
+            }
+        },
         syncCoursesFromServer(statusCourses) {
             if (!Array.isArray(statusCourses)) return;
             const byId = new Map(
@@ -837,6 +906,11 @@
             STATE.courses = STATE.courses.map((course) => {
                 const serverCourse = byId.get(course.lessonAssoc);
                 if (!serverCourse) return course;
+
+                if (course.selectedConfirmed) {
+                    STATE.toBeRemoved.add(course.lessonAssoc);
+                    return {...course, status: 'success', isPaused: true};
+                }
 
                 const nextStatus = serverCourse.status === 'success' ? 'success' : 'pending';
                 const nextPaused = serverCourse.status === 'paused';
@@ -909,6 +983,7 @@
             STATE.toBeRemoved.clear();
             STATE.courses.forEach(c => {
                 c.status = 'pending';
+                delete c.selectedConfirmed;
             });
             await this.syncCourseDetails(STATE.courses.map(c => c.lessonAssoc)).catch(() => {
             });
@@ -976,17 +1051,31 @@
         },
         startStatusPolling() {
             this.stopStatusPolling();
-            this.fetchServerStatus().catch(() => {
+            this.fetchServerStatus().catch(error => {
+                console.error('[抢课助手] 获取服务端状态失败:', error.message || error);
+            });
+            this.syncActuallySelectedCourses().catch(error => {
+                console.warn('[抢课助手] 已选课程同步失败:', error.message || error);
             });
             STATE.statusIntervalId = setInterval(() => {
-                this.fetchServerStatus().catch(() => {
+                this.fetchServerStatus().catch(error => {
+                    console.error('[抢课助手] 获取服务端状态失败:', error.message || error);
                 });
             }, 1000);
+            STATE.selectedCoursesIntervalId = setInterval(() => {
+                this.syncActuallySelectedCourses().catch(error => {
+                    console.warn('[抢课助手] 已选课程同步失败:', error.message || error);
+                });
+            }, 5000);
         },
         stopStatusPolling() {
             if (STATE.statusIntervalId) {
                 clearInterval(STATE.statusIntervalId);
                 STATE.statusIntervalId = null;
+            }
+            if (STATE.selectedCoursesIntervalId) {
+                clearInterval(STATE.selectedCoursesIntervalId);
+                STATE.selectedCoursesIntervalId = null;
             }
         },
     };
