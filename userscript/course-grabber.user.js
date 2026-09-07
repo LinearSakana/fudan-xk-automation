@@ -904,7 +904,7 @@
             const studentId = STATE.studentId;
             const turnId = STATE.turnId;
             const headers = STATE.headers;
-            const queryUrl = `/api/v1/student/course-select/query-lesson/${encodeURIComponent(STATE.turnId)}/${encodeURIComponent(STATE.studentId)}`;
+            const queryUrl = `/api/v1/student/course-select/selected-lessons/${encodeURIComponent(STATE.turnId)}/${encodeURIComponent(STATE.studentId)}`;
             const response = await fetch(queryUrl, {headers: {...STATE.headers}});
             const parsed = await response.json().catch(() => ({}));
             if (!response.ok || parsed?.result !== 0 || !Array.isArray(parsed?.data)) {
