@@ -431,11 +431,10 @@
             if (studentIdEl) {
                 if (STATE.hasFallbackCourse === 1) {
                     studentIdEl.textContent = '状态已过期';
-                    studentIdEl.style.display = 'inline-block';
                 } else {
                     studentIdEl.textContent = 'ID: ' + studentIdText;
-                    studentIdEl.style.display = STATE.studentId ? 'inline-block' : 'none';
                 }
+                studentIdEl.style.display = STATE.studentId ? 'inline-block' : 'none';
             }
 
             const skipCaptchaEl = document.getElementById('skip-captcha-checkbox');
