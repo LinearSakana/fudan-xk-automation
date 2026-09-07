@@ -376,7 +376,7 @@
                 #course-list li.course-paused { background: #f7fafc; opacity: 0.7; }
                 #course-list li.course-conflict { position: relative; }
                 #course-list li.course-conflict::after { content: ''; position: absolute; inset: 0; border-radius: inherit; pointer-events: none; background: repeating-linear-gradient(135deg, rgba(25, 25, 25, 0.045) 0 6px, rgba(236, 185, 38, 0.10) 6px 12px); }
-                .course-hover-card .hover-conflict { margin-top: 10px; padding: 8px 10px; border: 1px solid #f3dfad; border-radius: 8px; background: #fffaf0; color: #97651c; font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
+                .course-hover-card .hover-conflict { width: fit-content; max-width: 240px; box-sizing: border-box; margin-top: 10px; padding: 8px 10px; border: 1px solid #f3dfad; border-radius: 8px; background: #fffaf0; color: #97651c; font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
                 .course-main { flex-grow: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
                 .course-title { font-weight: 600; color: #2d3748; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
                 .course-teachers { font-size: 11px; color: #718096; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
