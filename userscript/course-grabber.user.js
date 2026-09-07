@@ -21,6 +21,8 @@
     const FIRST_RUN_NOTICE_KEY = 'first_run_notice_v1';
     const STATE = {
         courses: [], // 意向课程列表 { lessonAssoc: number, status: 'pending' | 'success', isPaused?: boolean, courseName?: string, teacherNames?: string[], schedule?: object[] }
+        selectedCourses: [],
+        courseConflicts: new Map(), // lessonAssoc -> Array<{ lessonAssoc, lessonNameZh }>
         studentId: '',
         turnId: '',
         semesterId: '505',
@@ -135,6 +137,40 @@
             schedule: scheduleItems,
             scheduleSummary,
         };
+    }
+
+    function rebuildConflicts() {
+        const overlaps = (startA, endA, startB, endB) => {
+            const values = [startA, endA, startB, endB];
+            if (values.some(value => value == null || value === '' || !Number.isFinite(Number(value)))) return false;
+            return Number(startA) <= Number(endB) && Number(startB) <= Number(endA);
+        };
+        const schedulesOverlap = (a, b) => (a.schedule || []).some(left =>
+            (b.schedule || []).some(right => {
+                if (!left.weekday || Number(left.weekday) !== Number(right.weekday)) return false;
+                const leftWeeks = left.weekRange || {};
+                const rightWeeks = right.weekRange || {};
+                if (leftWeeks.endWeek != null && rightWeeks.startWeek != null && Number(leftWeeks.endWeek) < Number(rightWeeks.startWeek)) return false;
+                if (rightWeeks.endWeek != null && leftWeeks.startWeek != null && Number(rightWeeks.endWeek) < Number(leftWeeks.startWeek)) return false;
+                return overlaps(left.startUnit, left.endUnit, right.startUnit, right.endUnit);
+            })
+        );
+        const isSportsCourse = course => (course.courseTableType?.nameZh || '').includes('通识教育专项教育课程：体育');  // 目前仅判断体育课冲突
+        const candidates = new Map([...STATE.courses, ...STATE.selectedCourses].map(course => [Number(course.lessonAssoc), course]));
+        STATE.courseConflicts = new Map(STATE.courses.map(course => {
+            const lessonAssoc = Number(course.lessonAssoc);
+            const current = candidates.get(lessonAssoc);
+            const conflicts = [];
+            for (const [otherId, other] of candidates) {
+                if (otherId === lessonAssoc) continue;
+                if ((current.courseCode && current.courseCode === other.courseCode)
+                    || schedulesOverlap(current, other)
+                    || (isSportsCourse(current) && isSportsCourse(other))) {
+                    conflicts.push({lessonAssoc: otherId, lessonNameZh: other.lessonNameZh || other.courseName || `Lesson ${otherId}`});
+                }
+            }
+            return [lessonAssoc, conflicts];
+        }));
     }
 
     function getCoursePayload() {
@@ -338,6 +374,9 @@
                 #course-list li { display: flex; align-items: center; padding: 10px 12px; border: 1px solid #e2e8f0; border-radius: 10px; background: #ffffff; transition: all 0.2s ease; }
                 #course-list li:hover { transform: translateY(-1px); border-color: #cbd5e0; box-shadow: 0 4px 12px rgba(0,0,0,0.05); }
                 #course-list li.course-paused { background: #f7fafc; opacity: 0.7; }
+                #course-list li.course-conflict { position: relative; }
+                #course-list li.course-conflict::after { content: ''; position: absolute; inset: 0; border-radius: inherit; pointer-events: none; background: repeating-linear-gradient(135deg, rgba(25, 25, 25, 0.045) 0 6px, rgba(236, 185, 38, 0.10) 6px 12px); }
+                .course-hover-card .hover-conflict { margin-top: 10px; padding: 8px 10px; border: 1px solid #f3dfad; border-radius: 8px; background: #fffaf0; color: #97651c; font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
                 .course-main { flex-grow: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
                 .course-title { font-weight: 600; color: #2d3748; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
                 .course-teachers { font-size: 11px; color: #718096; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -384,6 +423,7 @@
             return course.scheduleSummary.slice(0, 4).map(item => escapeHtml(item)).join('<br>');
         },
         buildCourseHoverCard(course) {
+            const conflicts = STATE.courseConflicts.get(Number(course.lessonAssoc)) || [];
             const courseCode = course.courseCode || course.lessonCode || '待同步';
             const teacherText = (Array.isArray(course.teacherNames) && course.teacherNames.length > 0)
                 ? course.teacherNames.join('、')
@@ -402,6 +442,7 @@
                 <div class="hover-row"><div class="hover-key">容量</div><div class="hover-value">${escapeHtml(limitText)}</div></div>
                 <div class="hover-row"><div class="hover-key">备注</div><div class="hover-value">${escapeHtml(remarkText)}</div></div>
                 <div class="hover-schedule"><div class="hover-key">时间</div><div class="hover-schedule-items">${this.formatScheduleDetails(course)}</div></div>
+                ${conflicts.length ? `<div class="hover-conflict">⚠️ 当前课程与${conflicts.map(item => escapeHtml(item.lessonNameZh)).join('，')}存在冲突，您可根据自身情况，决定是否处理互斥课程</div>` : ''}
             `;
         },
         positionHoverCard(clientX, clientY) {
@@ -453,6 +494,7 @@
             };
         },
         render() {
+            if (!this.courseListEl) return;
             const studentIdEl = document.getElementById('header-student-id');
             const studentIdText = STATE.studentId ? STATE.studentId : '未捕获';
             if (studentIdEl) {
@@ -496,7 +538,7 @@
             // --- Course List Memoization ---
             const currentCoursesState = STATE.courses.map(c =>
                 `${c.lessonAssoc}|${c.status}|${c.isPaused}|${c.courseName}|${c.teacherNames?.join(',')}`
-            ).join(';') + `|isGrabbing:${STATE.isGrabbing}`;
+            ).join(';') + `|isGrabbing:${STATE.isGrabbing}|conflicts:${JSON.stringify([...STATE.courseConflicts])}`;
 
             if (this.lastRenderState !== currentCoursesState) {
                 this.lastRenderState = currentCoursesState;
@@ -506,6 +548,9 @@
                 STATE.courses.forEach((course, index) => {
                     const li = document.createElement('li');
                     li.dataset.index = String(index);
+                    if (STATE.courseConflicts.get(Number(course.lessonAssoc))?.length) {
+                        li.classList.add('course-conflict');
+                    }
                     if (course.isPaused && STATE.isGrabbing) {
                         li.classList.add('course-paused');
                     }
@@ -583,6 +628,7 @@
 
                 if (target.dataset.action === 'delete') {
                     STATE.courses.splice(index, 1);
+                    rebuildConflicts();
                     Persistence.save();
                     this.render();
                 }
@@ -633,6 +679,7 @@
                 }
                 if (confirm('确定要清空所有意向课程吗？')) {
                     STATE.courses = [];
+                    STATE.courseConflicts.clear();
                     Persistence.save();
                     this.render();
                 }
@@ -645,6 +692,8 @@
                 STATE.studentId = '';
                 STATE.turnId = '';
                 STATE.headers = {};
+                STATE.selectedCourses = [];
+                rebuildConflicts();
                 STATE.rps = 0;
                 STATE.workers = 0;
                 Persistence.save();
@@ -732,6 +781,7 @@
                         STATE.turnId = turnId.toString();
                         if (!STATE.courses.some(c => c.lessonAssoc === lessonAssoc)) {
                             STATE.courses.push({lessonAssoc, status: 'pending', isPaused: false});
+                            rebuildConflicts();
                             ExecutionEngine.syncCourseDetails([lessonAssoc])
                                 .catch((error) => {
                                     console.warn('[抢课助手] 单课程详情同步失败:', error.message || error);
@@ -757,6 +807,7 @@
                             }
                         });
                         console.log(`[抢课助手] 导入 ${newCoursesCount} 门新课程 `);
+                        rebuildConflicts();
                         if (newCoursesCount > 0) {
                             ExecutionEngine.syncCourseDetails(STATE.courses.map(c => c.lessonAssoc))
                                 .catch((error) => {
@@ -829,8 +880,10 @@
             return lessons.map(lesson => normalizeLessonInfo(lesson));
         },
         async syncCourseDetails(lessonAssocs) {
-            const infos = await this.queryLessonInfo(lessonAssocs);
-            if (infos.length === 0) return [];
+            const [infos] = await Promise.all([
+                this.queryLessonInfo(lessonAssocs),
+                this.querySelectedCourses().catch(error => console.warn('[抢课助手] 冲突检查课表同步失败:', error.message || error)),
+            ]);
             const infoByLessonAssoc = new Map(infos.map(info => [info.lessonAssoc, info]));
             let updated = false;
             STATE.courses = STATE.courses.map(course => {
@@ -841,30 +894,39 @@
             });
             if (updated) {
                 Persistence.save();
-                UI.render();
             }
+            rebuildConflicts();
+            UI.render();
             return infos;
         },
         async querySelectedCourses() {
             if (!STATE.studentId || !STATE.turnId || Object.keys(STATE.headers).length === 0) return [];
+            const studentId = STATE.studentId;
+            const turnId = STATE.turnId;
+            const headers = STATE.headers;
             const queryUrl = `/api/v1/student/course-select/query-lesson/${encodeURIComponent(STATE.turnId)}/${encodeURIComponent(STATE.studentId)}`;
             const response = await fetch(queryUrl, {headers: {...STATE.headers}});
             const parsed = await response.json().catch(() => ({}));
             if (!response.ok || parsed?.result !== 0 || !Array.isArray(parsed?.data)) {
                 throw new Error(parsed?.message || '已选课程响应格式无效');
             }
-            return parsed.data.map(lesson => ({
+            const selectedCourses = parsed.data.map(lesson => ({
                 ...normalizeLessonInfo(lesson),
                 status: 'success',
                 isPaused: true,
                 selectedConfirmed: true,
             }));
+            if (STATE.studentId !== studentId || STATE.turnId !== turnId || STATE.headers !== headers) return [];
+            STATE.selectedCourses = selectedCourses;
+            rebuildConflicts();
+            return selectedCourses;
         },
         async syncActuallySelectedCourses() {
             if (!STATE.isGrabbing || this.isSelectedCoursesSyncing) return;
             this.isSelectedCoursesSyncing = true;
             try {
                 const selectedCourses = await this.querySelectedCourses();
+                UI.render();
                 const selectedById = new Map(selectedCourses.map(course => [course.lessonAssoc, course]));
                 const pausedIds = new Set();
                 for (const course of STATE.courses) {
@@ -884,6 +946,7 @@
                     return {...course, ...selectedById.get(course.lessonAssoc)};
                 });
                 Persistence.save();
+                rebuildConflicts();
                 UI.render();
             } finally {
                 this.isSelectedCoursesSyncing = false;
@@ -1032,6 +1095,7 @@
             });
             Persistence.save();
             this.stopStatusPolling();
+            rebuildConflicts();
             UI.render();
         },
         async fetchServerStatus() {
@@ -1089,7 +1153,9 @@
                 ExecutionEngine.syncCourseDetails(STATE.courses.map(c => c.lessonAssoc)).catch(err => console.warn('[抢课助手] 初始化课程详情同步失败:', err.message || err));
             }
         };
-        const mountUi = () => {
+        const mountUi = async () => {
+            await ExecutionEngine.querySelectedCourses().catch(err => console.warn('[抢课助手] 初始化课表同步失败:', err.message || err));
+            rebuildConflicts();
             UI.createPanel();
             uiMounted = true;
             UI.render();
