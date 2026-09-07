@@ -1382,6 +1382,25 @@
                 UI.render();
                 return;
             }
+
+            const conflictingIds = new Set(
+                STATE.courses
+                    .filter(course => course.status === 'success')
+                    .flatMap(course => STATE.courseConflicts.get(course.lessonAssoc) || [])
+                    .map(course => course.lessonAssoc)
+            );
+            const conflictingRunningCourses = STATE.courses.filter(course =>
+                course.status !== 'success' && !course.isPaused && conflictingIds.has(course.lessonAssoc)
+            );
+            for (const course of conflictingRunningCourses) {
+                try {
+                    status = await requestApi('/course/pause', 'POST', {lessonAssoc: course.lessonAssoc});
+                    this.syncCoursesFromServer(status?.courses);
+                } catch (error) {
+                    console.warn(`[抢课助手] 自动暂停互斥课程 ${course.lessonAssoc} 失败:`, error.message || error);
+                }
+            }
+
             STATE.rps = Number(status?.rps || 0);
             STATE.workers = Number(status?.workers || 0);
             if (STATE.isGrabbing && status?.running === false) {
