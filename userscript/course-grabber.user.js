@@ -105,7 +105,7 @@
         return {
             lessonAssoc: lesson.id,
             lessonCode: lesson.code || null,
-            lessonNameZh: lesson.nameZh || null,
+            lessonNameZh: lesson.nameZh || lesson.course?.nameZh || null,
             lessonNameEn: lesson.nameEn || null,
             courseId: lesson.course?.id ?? null,
             courseCode: lesson.course?.code || null,
