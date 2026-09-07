@@ -964,9 +964,17 @@
     function init() {
         console.log('[抢课助手] 脚本已启动 ');
         Persistence.load();
+        let uiMounted = false;
+        const runInitialCourseSync = () => {
+            if (uiMounted && STATE.courses.length > 0 && STATE.studentId && STATE.turnId && Object.keys(STATE.headers).length > 0) {
+                ExecutionEngine.syncCourseDetails(STATE.courses.map(c => c.lessonAssoc)).catch(err => console.warn('[抢课助手] 初始化课程详情同步失败:', err.message || err));
+            }
+        };
         const mountUi = () => {
             UI.createPanel();
+            uiMounted = true;
             UI.render();
+            runInitialCourseSync();
             showFirstRunNotice();
             requestApi('/status', 'GET').then((status) => {
                 STATE.isGrabbing = Boolean(status?.running);
@@ -989,14 +997,9 @@
             mountUi();
         }
         XHRInterceptor.init();
-        // 初始化时，尝试同步课程详情
-        if (STATE.courses.length > 0 && STATE.studentId && STATE.turnId && Object.keys(STATE.headers).length > 0) {
-            ExecutionEngine.syncCourseDetails(STATE.courses.map(c => c.lessonAssoc)).catch(err => console.warn('[抢课助手] 初始化课程详情同步失败:', err.message || err));
-        }
+        runInitialCourseSync();
     }
 
     init();
 
 })();
-
-
