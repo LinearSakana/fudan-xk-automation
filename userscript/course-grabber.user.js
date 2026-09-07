@@ -34,6 +34,7 @@
         statusIntervalId: null,
         toBeRemoved: new Set(),
         serverErrorNoticeKey: '',
+        hasFallbackCourse: 0,
     };
     const WEEKDAY_LABELS = ['', '周一', '周二', '周三', '周四', '周五', '周六', '周日'];
 
@@ -426,10 +427,15 @@
         },
         render() {
             const studentIdEl = document.getElementById('header-student-id');
-            const StudentIdText = STATE.studentId ? STATE.studentId : '未捕获';
-            if (studentIdEl && studentIdEl.textContent !== StudentIdText) {
-                studentIdEl.textContent = 'ID: ' + StudentIdText;
-                studentIdEl.style.display = STATE.studentId ? 'inline-block' : 'none';
+            const studentIdText = STATE.studentId ? STATE.studentId : '未捕获';
+            if (studentIdEl) {
+                if (STATE.hasFallbackCourse === 1) {
+                    studentIdEl.textContent = '状态已过期';
+                    studentIdEl.style.display = 'inline-block';
+                } else {
+                    studentIdEl.textContent = 'ID: ' + studentIdText;
+                    studentIdEl.style.display = STATE.studentId ? 'inline-block' : 'none';
+                }
             }
 
             const skipCaptchaEl = document.getElementById('skip-captcha-checkbox');
@@ -697,9 +703,11 @@
                         STATE.turnId = turnId.toString();
                         if (!STATE.courses.some(c => c.lessonAssoc === lessonAssoc)) {
                             STATE.courses.push({lessonAssoc, status: 'pending', isPaused: false});
-                            ExecutionEngine.syncCourseDetails([lessonAssoc]).catch((error) => {
-                                console.warn('[抢课助手] 单课程详情同步失败:', error.message || error);
-                            });
+                            ExecutionEngine.syncCourseDetails([lessonAssoc])
+                                .then(() => ExecutionEngine.refreshAllCourseDetails())
+                                .catch((error) => {
+                                    console.warn('[抢课助手] 单课程详情同步失败:', error.message || error);
+                                });
                         }
                         Persistence.save();
                         UI.render();
@@ -721,9 +729,11 @@
                         });
                         console.log(`[抢课助手] 导入 ${newCoursesCount} 门新课程 `);
                         if (newCoursesCount > 0) {
-                            ExecutionEngine.syncCourseDetails(STATE.courses.map(c => c.lessonAssoc)).catch((error) => {
-                                console.warn('[抢课助手] 批量课程详情同步失败:', error.message || error);
-                            });
+                            ExecutionEngine.syncCourseDetails(STATE.courses.map(c => c.lessonAssoc))
+                                .then(() => ExecutionEngine.refreshAllCourseDetails())
+                                .catch((error) => {
+                                    console.warn('[抢课助手] 批量课程详情同步失败:', error.message || error);
+                                });
                         }
                         STATE.isImporting = false; // 导入一次后自动关闭
                         Persistence.save();
@@ -747,6 +757,16 @@
     };
     // --- 抢课执行引擎 ---
     const ExecutionEngine = {
+        isFallbackCourse(course) {
+            return !course.courseName || !Array.isArray(course.teacherNames) || course.teacherNames.length === 0;
+        },
+        refreshAllCourseDetails() {
+            if (STATE.courses.some(c => ExecutionEngine.isFallbackCourse(c))) {
+                this.syncCourseDetails(STATE.courses.map(c => c.lessonAssoc)).catch(() => {
+                });
+            }
+            STATE.hasFallbackCourse = STATE.courses.some(c => this.isFallbackCourse(c)) ? 1 : 0;
+        },
         async queryLessonInfo(lessonAssocs) {
             const normalizedIds = uniqueNonEmpty((lessonAssocs || []).map(id => Number(id))).map(id => Number(id)).filter(id => Number.isFinite(id) && id > 0);
             if (normalizedIds.length === 0) return [];
