@@ -335,6 +335,8 @@
                 .btn-start.grabbing { background: linear-gradient(135deg, #f56565 0%, #e53e3e 100%); box-shadow: 0 4px 12px rgba(229, 62, 62, 0.3); }
                 .btn-start.grabbing:hover:not(:disabled) { box-shadow: 0 6px 16px rgba(229, 62, 62, 0.4); }
                 button:disabled { cursor: not-allowed; opacity: 0.5; }
+                .btn-secondary.important-hint { border-color: #f6ad55; color: #c05621; box-shadow: 0 0 0 2px rgba(246, 173, 85, 0.12), 0 0 10px rgba(246, 173, 85, 0.35); animation: important-hint-glow 1.6s ease-in-out infinite alternate; }               
+                @keyframes important-hint-glow { to { box-shadow: 0 0 0 3px rgba(246, 173, 85, 0.18), 0 0 16px rgba(246, 173, 85, 0.65); } }
                 .course-hover-card { position: fixed; z-index: 10000; width: max-content; max-width: 320px; padding: 14px; border: 1px solid rgba(255,255,255,0.8); border-radius: 12px; background: rgba(255, 255, 255, 0.95); backdrop-filter: blur(12px); box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1), 0 4px 10px rgba(0, 0, 0, 0.05); color: #2d3748; font-size: 12px; line-height: 1.5; pointer-events: none; opacity: 0; transform: translateY(8px); transition: opacity 0.15s ease, transform 0.15s ease; }
                 .course-hover-card.show { opacity: 1; transform: translateY(0); }
                 .hover-title { font-size: 14px; font-weight: 600; color: #1a202c; margin-bottom: 8px; }
@@ -436,7 +438,10 @@
                 }
                 studentIdEl.style.display = STATE.studentId ? 'inline-block' : 'none';
             }
-
+            const resetBtn = document.getElementById('reset-btn');
+            if (resetBtn) {
+                resetBtn.classList.toggle('important-hint', STATE.hasFallbackCourse === 1);
+            }
             const skipCaptchaEl = document.getElementById('skip-captcha-checkbox');
             if (skipCaptchaEl && skipCaptchaEl.checked !== STATE.skipCaptcha) {
                 skipCaptchaEl.checked = STATE.skipCaptcha;
