@@ -223,7 +223,7 @@
             padding: 20px;
             box-sizing: border-box;
         ">
-            <div style="
+            <div role="dialog" aria-modal="true" aria-labelledby="grabber-first-run-title" style="
                 width: 460px;
                 max-width: 100%;
                 background: #fff;
@@ -234,7 +234,7 @@
                 font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI',
                              Roboto, Helvetica, Arial, sans-serif;
             ">
-                <div style="
+                <div id="grabber-first-run-title" style="
                     font-size: 20px;
                     font-weight: 600;
                     margin-bottom: 14px;
@@ -285,12 +285,20 @@
 
         document.body.appendChild(overlay);
 
-        document
-            .getElementById('grabber-first-run-confirm')
-            .addEventListener('click', () => {
+        const confirmButton = document.getElementById('grabber-first-run-confirm');
+        const close = () => {
                 localStorage.setItem(FIRST_RUN_NOTICE_KEY, '1');
                 overlay.remove();
-            });
+        };
+        confirmButton.addEventListener('click', close);
+        overlay.addEventListener('keydown', (event) => {
+            if (event.key === 'Escape') close();
+            if (event.key === 'Tab') {
+                event.preventDefault();
+                confirmButton.focus();
+            }
+        });
+        confirmButton.focus();
     }
 
     const Timetable = {
@@ -344,8 +352,8 @@
                 const index = Number(block.dataset.courseIndex);
                 const course = this.courses[index];
                 const rect = block.getBoundingClientRect();
-                UI.showHoverCard(course, `timetable-${index}`, event.clientX ?? rect.right, event.clientY ?? rect.top,
-                    this.conflicts.get(Number(course.lessonAssoc)) || [], true);
+                UI.showHoverCard(course, `timetable-${index}`, event.clientX || rect.right, event.clientY || rect.top,
+                    this.conflicts.get(Number(course.lessonAssoc)) || [], true, block);
             };
             panel.addEventListener('mousemove', showDetails);
             panel.addEventListener('focusin', showDetails);
@@ -474,6 +482,7 @@
         panel: null,
         courseListEl: null,
         hoverCardEl: null,
+        hoverTriggerEl: null,
         hoverCourseIndex: -1,
         lastRenderState: null,
         lastButtonsState: null,
@@ -481,6 +490,8 @@
             if (document.getElementById('grabber-panel')) return;
             const panel = document.createElement('div');
             panel.id = 'grabber-panel';
+            panel.setAttribute('role', 'region');
+            panel.setAttribute('aria-label', '选课助手');
             panel.innerHTML = `
                 <div class="grabber-header">
                     <span class="grabber-title">选课助手 <button id="timetable-btn" class="grabber-icon-btn" title="打开课程表" aria-label="打开课程表" aria-expanded="false">🗓️</button></span>
@@ -493,7 +504,7 @@
                             <span class="checkmark"></span>
                             跳过验证
                         </label>
-                        <div class="rps-display" title="本地服务状态">
+                    <div class="rps-display" title="本地服务状态" aria-label="本地服务状态">
                             RPS: <span id="rps-value">0</span> | Workers: <span id="workers-value">0</span>
                         </div>
                     </div>
@@ -502,7 +513,7 @@
                         <input type="range" id="concurrency-slider" min="1" max="10" value="2">
                         <span id="concurrency-value" class="badge">2</span>
                     </div>
-                    <ul id="course-list"></ul>
+                    <ul id="course-list" aria-label="意向课程"></ul>
                     <div class="grabber-sub-actions">
                         <button id="import-btn" class="btn-secondary" title="从页面自动捕获课程">导入页面</button>
                         <button id="reset-btn" class="btn-secondary" title="清除学号等上下文">重置状态</button>
@@ -526,6 +537,8 @@
             const hoverCard = document.createElement('div');
             hoverCard.id = 'course-hover-card';
             hoverCard.className = 'course-hover-card';
+            hoverCard.setAttribute('role', 'tooltip');
+            hoverCard.setAttribute('aria-hidden', 'true');
             document.body.appendChild(hoverCard);
             this.hoverCardEl = hoverCard;
         },
@@ -584,7 +597,8 @@
                 .grabber-body { padding: 14px; display: flex; flex-direction: column; gap: 10px; }
                 .grabber-controls { display: flex; justify-content: space-between; align-items: center; }
                 .checkbox-label { display: flex; align-items: center; gap: 6px; cursor: pointer; font-size: 13px; color: #4a5568; user-select: none; }
-                .checkbox-label input { display: none; }
+                .checkbox-label input { position: absolute; width: 1px; height: 1px; opacity: 0; }
+                .checkbox-label input:focus-visible + .checkmark { outline: 2px solid #3182ce; outline-offset: 2px; }
                 .checkmark { width: 16px; height: 16px; border: 2px solid #cbd5e0; border-radius: 4px; display: inline-block; position: relative; transition: all 0.2s; }
                 .checkbox-label input:checked + .checkmark { background: #3182ce; border-color: #3182ce; }
                 .checkbox-label input:checked + .checkmark::after { content: ''; position: absolute; left: 4px; top: 1px; width: 4px; height: 8px; border: solid white; border-width: 0 2px 2px 0; transform: rotate(45deg); }
@@ -615,6 +629,7 @@
                 @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(66, 153, 225, 0.4); } 70% { box-shadow: 0 0 0 6px rgba(66, 153, 225, 0); } 100% { box-shadow: 0 0 0 0 rgba(66, 153, 225, 0); } }
                 .course-actions button { background: none; border: none; cursor: pointer; font-size: 14px; color: #e53e3e; opacity: 0.6; transition: all 0.2s; padding: 4px; display: flex; align-items: center; justify-content: center; border-radius: 6px; }
                 .course-actions button:hover { opacity: 1; background: #fff5f5; }
+                #grabber-panel button:focus-visible, #grabber-panel input:focus-visible { outline: 2px solid #3182ce; outline-offset: 2px; }
                 .grabber-sub-actions { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
                 .btn-secondary { padding: 6px 0; border: 1px solid #e2e8f0; border-radius: 8px; cursor: pointer; background: #ffffff; color: #4a5568; font-size: 12px; font-weight: 500; transition: all 0.2s; }
                 .btn-secondary:hover:not(:disabled) { background: #f7fafc; border-color: #cbd5e0; }
@@ -627,6 +642,7 @@
                 button:disabled { cursor: not-allowed; opacity: 0.5; }
                 .btn-secondary.important-hint { border-color: #f6ad55; color: #c05621; box-shadow: 0 0 0 2px rgba(246, 173, 85, 0.12), 0 0 10px rgba(246, 173, 85, 0.35); animation: important-hint-glow 1.6s ease-in-out infinite alternate; }               
                 @keyframes important-hint-glow { to { box-shadow: 0 0 0 3px rgba(246, 173, 85, 0.18), 0 0 16px rgba(246, 173, 85, 0.65); } }
+                @media (prefers-reduced-motion: reduce) { #grabber-panel, #grabber-panel *, .course-hover-card { animation: none !important; transition: none !important; } }
                 .course-hover-card { position: fixed; z-index: 10000; width: max-content; max-width: 320px; padding: 14px; border: 1px solid rgba(255,255,255,0.8); border-radius: 12px; background: rgba(255, 255, 255, 0.95); backdrop-filter: blur(12px); box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1), 0 4px 10px rgba(0, 0, 0, 0.05); color: #2d3748; font-size: 12px; line-height: 1.5; pointer-events: none; opacity: 0; transform: translateY(8px); transition: opacity 0.15s ease, transform 0.15s ease; }
                 .course-hover-card.show { opacity: 1; transform: translateY(0); }
                 .hover-title { font-size: 14px; font-weight: 600; color: #1a202c; margin-bottom: 8px; }
@@ -697,19 +713,28 @@
             this.hoverCardEl.style.left = `${left}px`;
             this.hoverCardEl.style.top = `${top}px`;
         },
-        showHoverCard(course, index, clientX, clientY, conflicts, timetable = false) {
+        showHoverCard(course, index, clientX, clientY, conflicts, timetable = false, trigger = null) {
             if (!this.hoverCardEl || !course) return;
+            if (this.hoverTriggerEl !== trigger) {
+                this.hoverTriggerEl?.removeAttribute('aria-describedby');
+                this.hoverTriggerEl = trigger;
+                this.hoverTriggerEl?.setAttribute('aria-describedby', this.hoverCardEl.id);
+            }
             if (this.hoverCourseIndex !== index) {
                 this.hoverCardEl.classList.toggle('hover-timetable', timetable);
                 this.hoverCardEl.innerHTML = this.buildCourseHoverCard(course, conflicts, timetable);
                 this.hoverCourseIndex = index;
             }
             this.hoverCardEl.classList.add('show');
+            this.hoverCardEl.setAttribute('aria-hidden', 'false');
             this.positionHoverCard(clientX, clientY);
         },
         hideHoverCard() {
             if (!this.hoverCardEl) return;
             this.hoverCardEl.classList.remove('show');
+            this.hoverCardEl.setAttribute('aria-hidden', 'true');
+            this.hoverTriggerEl?.removeAttribute('aria-describedby');
+            this.hoverTriggerEl = null;
             this.hoverCourseIndex = -1;
         },
         makeDraggable(element, handle) {
@@ -805,9 +830,10 @@
                         const statusClass = course.status === 'success' ? 'status-success' : (course.isPaused ? 'status-paused' : 'status-running');
                         const statusText = course.status === 'success' ? '成功' : (course.isPaused ? '已暂停' : '抢课中');
                         const disabledAttr = course.status === 'success' ? 'disabled' : '';
-                        rightContent = `<button class="course-status-pill ${statusClass}" data-index="${index}" data-action="toggle-pause" title="${escapeHtml(statusText)}" aria-label="${escapeHtml(statusText)}" ${disabledAttr}></button>`;
+                        const actionLabel = course.status === 'success' ? `${courseName}：成功` : `${course.isPaused ? '继续' : '暂停'} ${courseName}`;
+                        rightContent = `<button class="course-status-pill ${statusClass}" data-index="${index}" data-action="toggle-pause" title="${escapeHtml(statusText)}" aria-label="${escapeHtml(actionLabel)}" ${disabledAttr}></button>`;
                     } else {
-                        rightContent = `<div class="course-actions"><button data-index="${index}" data-action="delete" title="删除">✖</button></div>`;
+                        rightContent = `<div class="course-actions"><button data-index="${index}" data-action="delete" title="删除" aria-label="删除 ${escapeHtml(courseName)}">✖</button></div>`;
                     }
 
                     li.innerHTML = `
@@ -886,7 +912,18 @@
                     this.hideHoverCard();
                     return;
                 }
-                this.showHoverCard(STATE.courses[index], index, e.clientX, e.clientY);
+                this.showHoverCard(STATE.courses[index], index, e.clientX, e.clientY, undefined, false, li);
+            });
+            this.courseListEl.addEventListener('focusin', (e) => {
+                const li = e.target.closest('li[data-index]');
+                if (!li) return;
+                const index = Number(li.dataset.index);
+                if (!Number.isInteger(index) || index < 0 || index >= STATE.courses.length) return;
+                const rect = li.getBoundingClientRect();
+                this.showHoverCard(STATE.courses[index], index, rect.right, rect.top, undefined, false, e.target);
+            });
+            this.courseListEl.addEventListener('focusout', (e) => {
+                if (!e.relatedTarget || !this.courseListEl.contains(e.relatedTarget)) this.hideHoverCard();
             });
             this.courseListEl.addEventListener('mouseleave', () => {
                 this.hideHoverCard();
