@@ -703,12 +703,12 @@
                         if (!STATE.courses.some(c => c.lessonAssoc === lessonAssoc)) {
                             STATE.courses.push({lessonAssoc, status: 'pending', isPaused: false});
                             ExecutionEngine.syncCourseDetails([lessonAssoc])
-                                .then(() => ExecutionEngine.refreshAllCourseDetails())
                                 .catch((error) => {
                                     console.warn('[抢课助手] 单课程详情同步失败:', error.message || error);
                                 });
                         }
                         Persistence.save();
+                        ExecutionEngine.refreshAllCourseDetails();
                         UI.render();
                     } catch (e) {
                         console.error('[抢课助手] 解析请求 payload 失败:', e);
@@ -729,13 +729,13 @@
                         console.log(`[抢课助手] 导入 ${newCoursesCount} 门新课程 `);
                         if (newCoursesCount > 0) {
                             ExecutionEngine.syncCourseDetails(STATE.courses.map(c => c.lessonAssoc))
-                                .then(() => ExecutionEngine.refreshAllCourseDetails())
                                 .catch((error) => {
                                     console.warn('[抢课助手] 批量课程详情同步失败:', error.message || error);
                                 });
                         }
                         STATE.isImporting = false; // 导入一次后自动关闭
                         Persistence.save();
+                        ExecutionEngine.refreshAllCourseDetails();
                         UI.render();
                     }
                 }
@@ -760,11 +760,17 @@
             return !course.courseName || !Array.isArray(course.teacherNames) || course.teacherNames.length === 0;
         },
         refreshAllCourseDetails() {
-            if (STATE.courses.some(c => ExecutionEngine.isFallbackCourse(c))) {
-                this.syncCourseDetails(STATE.courses.map(c => c.lessonAssoc)).catch(() => {
-                });
+            if (STATE.courses.some(c => this.isFallbackCourse(c))) {
+                this.syncCourseDetails(STATE.courses.map(c => c.lessonAssoc))
+                    .finally(() => {
+                        STATE.hasFallbackCourse =
+                            STATE.courses.some(c => this.isFallbackCourse(c)) ? 1 : 0;
+                        UI.render();
+                    });
+            } else {
+                STATE.hasFallbackCourse = 0;
+                UI.render();
             }
-            STATE.hasFallbackCourse = STATE.courses.some(c => this.isFallbackCourse(c)) ? 1 : 0;
         },
         async queryLessonInfo(lessonAssocs) {
             const normalizedIds = uniqueNonEmpty((lessonAssocs || []).map(id => Number(id))).map(id => Number(id)).filter(id => Number.isFinite(id) && id > 0);
