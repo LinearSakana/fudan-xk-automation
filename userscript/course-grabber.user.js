@@ -442,7 +442,7 @@
                 <div class="hover-row"><div class="hover-key">容量</div><div class="hover-value">${escapeHtml(limitText)}</div></div>
                 <div class="hover-row"><div class="hover-key">备注</div><div class="hover-value">${escapeHtml(remarkText)}</div></div>
                 <div class="hover-schedule"><div class="hover-key">时间</div><div class="hover-schedule-items">${this.formatScheduleDetails(course)}</div></div>
-                ${conflicts.length ? `<div class="hover-conflict">⚠️ 当前课程与${conflicts.map(item => escapeHtml(item.lessonNameZh)).join('，')}存在冲突，您可根据自身情况，决定是否处理互斥课程</div>` : ''}
+                ${conflicts.length ? `<div class="hover-conflict">⚠️ 当前课程与${conflicts.map(item => escapeHtml(item.lessonNameZh)).join('，')}存在冲突，您可根据自身情况，决定该课程的去留</div>` : ''}
             `;
         },
         positionHoverCard(clientX, clientY) {
