@@ -41,6 +41,38 @@
     };
     const WEEKDAY_LABELS = ['', '周一', '周二', '周三', '周四', '周五', '周六', '周日'];
 
+    function watchDialog() {
+        const handledDialogs = new WeakSet();
+        const closeSpecificDialog = () => {
+            document.querySelectorAll('div.el-dialog[aria-label="选课结果"]').forEach((dialog) => {
+                if (dialog.getClientRects().length === 0) {
+                    handledDialogs.delete(dialog);
+                    return;
+                }
+                if (handledDialogs.has(dialog)) return;
+
+                const result = dialog.querySelector('.el-dialog__body .result-content');
+                if (result?.textContent.trim() !== '可选人数已满，请有余量后再选') return;
+
+                const closeButton = Array.from(dialog.querySelectorAll('button.el-button.el-button--default[type="button"]'))
+                    .find(button => button.textContent.replace(/\s/g, '') === '关闭');
+                if (!closeButton) return;
+
+                handledDialogs.add(dialog);
+                closeButton.click();
+            });
+        };
+
+        new MutationObserver(closeSpecificDialog).observe(document, {
+            childList: true,
+            subtree: true,
+            characterData: true,
+            attributes: true,
+            attributeFilter: ['class', 'style', 'aria-hidden'],
+        });
+        closeSpecificDialog();
+    }
+
     function escapeHtml(text) {
         if (text === null || text === undefined) return '';
         return String(text).replace(/[&<>"']/g, (ch) => {
@@ -1442,6 +1474,7 @@
 
     function init() {
         console.log('[抢课助手] 脚本已启动 ');
+        watchDialog();
         Persistence.load();
         let uiMounted = false;
         const runInitialCourseSync = () => {
