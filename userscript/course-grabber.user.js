@@ -1375,8 +1375,8 @@
             rebuildConflicts();
             UI.render();
         },
-        async fetchServerStatus() {
-            const status = await requestApi('/status', 'GET');
+        async fetchAndRefreshCourseGrabStatus() {
+            let status = await requestApi('/status', 'GET');
             this.syncCoursesFromServer(status?.courses);
             if (this.handleServerError(status)) {
                 UI.render();
@@ -1392,14 +1392,14 @@
         },
         startStatusPolling() {
             this.stopStatusPolling();
-            this.fetchServerStatus().catch(error => {
+            this.fetchAndRefreshCourseGrabStatus().catch(error => {
                 console.error('[抢课助手] 获取服务端状态失败:', error.message || error);
             });
             this.syncActuallySelectedCourses().catch(error => {
                 console.warn('[抢课助手] 已选课程同步失败:', error.message || error);
             });
             STATE.statusIntervalId = setInterval(() => {
-                this.fetchServerStatus().catch(error => {
+                this.fetchAndRefreshCourseGrabStatus().catch(error => {
                     console.error('[抢课助手] 获取服务端状态失败:', error.message || error);
                 });
             }, 1000);
