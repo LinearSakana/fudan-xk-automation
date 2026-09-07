@@ -535,7 +535,7 @@
                 workersEl.textContent = workersText;
             }
 
-            // --- Course List Memoization ---
+            // --- 课程列表缓存 ---
             const currentCoursesState = STATE.courses.map(c =>
                 `${c.lessonAssoc}|${c.status}|${c.isPaused}|${c.courseName}|${c.teacherNames?.join(',')}`
             ).join(';') + `|isGrabbing:${STATE.isGrabbing}|conflicts:${JSON.stringify([...STATE.courseConflicts])}`;
@@ -582,7 +582,7 @@
                 this.hideHoverCard();
             }
 
-            // --- Buttons Memoization ---
+            // --- 按钮状态缓存 ---
             const currentButtonsState = `${STATE.isGrabbing}|${STATE.isImporting}`;
             if (this.lastButtonsState !== currentButtonsState) {
                 this.lastButtonsState = currentButtonsState;
