@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         复旦选课助手
 // @namespace    https://github.com/LinearSakana/fudan-xk-automation
-// @version      0.1.0
+// @version      0.2.0
 // @description  复旦大学本科生选课助手，使用前请确保已启动本地 Server
 // @author       LinearSakana
 // @match        *://xk.fudan.edu.cn/*
@@ -18,7 +18,7 @@
     // --- 全局配置 ---
     const SERVER_BASE_URL = 'http://127.0.0.1:30522';
     const STORAGE_KEY = 'fudan_course_grabber_state';
-    const FIRST_RUN_NOTICE_KEY = 'first_run_notice_v1';
+    const FIRST_RUN_NOTICE_KEY = 'first_run_notice_v2';
     const STATE = {
         courses: [], // 意向课程列表 { lessonAssoc: number, status: 'pending' | 'success', isPaused?: boolean, courseName?: string, teacherNames?: string[], schedule?: object[] }
         selectedCourses: [],
