@@ -494,7 +494,7 @@
             panel.setAttribute('aria-label', '选课助手');
             panel.innerHTML = `
                 <div class="grabber-header">
-                    <span class="grabber-title">选课助手 <button id="timetable-btn" class="grabber-icon-btn" title="打开课程表" aria-label="打开课程表" aria-expanded="false">🗓️</button></span>
+                    <span class="grabber-title">选课助手 <button id="timetable-btn" class="grabber-icon-btn" title="打开课程表" aria-label="打开课程表" aria-expanded="false" aria-haspopup="dialog" aria-controls="grabber-timetable">🗓️</button></span>
                     <span id="header-student-id" class="header-student-id" title="StudentID" style="display: none;"></span>
                 </div>
                 <div class="grabber-body">
