@@ -126,6 +126,13 @@
         return courses;
     }
 
+    function isCourseInfoFallback(course) {
+        if (!course) return false;
+        const hasCourseName = Boolean(course.courseName);
+        const hasTeacherNames = Array.isArray(course.teacherNames) && course.teacherNames.length > 0;
+        return !hasCourseName && !hasTeacherNames;
+    }
+
     async function requestApi(path, method = 'GET', payload = null) {
         const response = await fetch(`${SERVER_BASE_URL}${path}`, {
             method,
@@ -426,10 +433,11 @@
         },
         render() {
             const studentIdEl = document.getElementById('header-student-id');
-            const StudentIdText = STATE.studentId ? STATE.studentId : '未捕获';
-            if (studentIdEl && studentIdEl.textContent !== StudentIdText) {
-                studentIdEl.textContent = 'ID: ' + StudentIdText;
-                studentIdEl.style.display = STATE.studentId ? 'inline-block' : 'none';
+            const hasFallbackCourse = STATE.courses.some(isCourseInfoFallback);
+            const studentIdText = hasFallbackCourse ? '状态已过期' : (STATE.studentId ? `ID: ${STATE.studentId}` : 'ID: 未捕获');
+            if (studentIdEl && studentIdEl.textContent !== studentIdText) {
+                studentIdEl.textContent = studentIdText;
+                studentIdEl.style.display = (hasFallbackCourse || STATE.studentId) ? 'inline-block' : 'none';
             }
 
             const skipCaptchaEl = document.getElementById('skip-captcha-checkbox');
@@ -998,5 +1006,4 @@
     init();
 
 })();
-
 
