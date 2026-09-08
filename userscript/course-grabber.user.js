@@ -37,7 +37,7 @@
         syncSelectedCoursesIntvId: null,
         toBeRemoved: new Set(),
         serverErrorNoticeKey: '',
-        hasFallbackCourse: 0,
+        hasIncompleteCourseInfo: false,
     };
     const WEEKDAY_LABELS = ['', '周一', '周二', '周三', '周四', '周五', '周六', '周日'];
 
@@ -803,7 +803,7 @@
             const studentIdEl = document.getElementById('header-student-id');
             const studentIdText = STATE.studentId ? STATE.studentId : '未捕获';
             if (studentIdEl) {
-                if (STATE.hasFallbackCourse === 1) {
+                if (STATE.hasIncompleteCourseInfo) {
                     studentIdEl.textContent = '状态已过期';
                 } else {
                     studentIdEl.textContent = 'ID: ' + studentIdText;
@@ -812,7 +812,7 @@
             }
             const resetBtn = document.getElementById('reset-btn');
             if (resetBtn) {
-                resetBtn.classList.toggle('important-hint', STATE.hasFallbackCourse === 1);
+                resetBtn.classList.toggle('important-hint', STATE.hasIncompleteCourseInfo);
             }
             const skipCaptchaEl = document.getElementById('skip-captcha-checkbox');
             if (skipCaptchaEl && skipCaptchaEl.checked !== STATE.skipCaptcha) {
@@ -1178,12 +1178,11 @@
             if (STATE.courses.some(c => this.isFallbackCourse(c))) {
                 this.syncCourseDetails(STATE.courses.map(c => c.lessonAssoc))
                     .finally(() => {
-                        STATE.hasFallbackCourse =
-                            STATE.courses.some(c => this.isFallbackCourse(c)) ? 1 : 0;
+                        STATE.hasIncompleteCourseInfo = STATE.courses.some(c => this.isFallbackCourse(c));
                         UI.render();
                     });
             } else {
-                STATE.hasFallbackCourse = 0;
+                STATE.hasIncompleteCourseInfo = false;
                 UI.render();
             }
         },
