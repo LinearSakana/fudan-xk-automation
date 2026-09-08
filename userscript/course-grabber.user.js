@@ -400,7 +400,7 @@
                 const move = e => {
                     const dx = e.clientX - event.clientX, dy = e.clientY - event.clientY;
                     const width = Math.min(window.innerWidth - 16, Math.max(0, rect.width + (edge.includes('w') ? -dx : dx)));
-                    const height = Math.min(window.innerHeight - 16, Math.max(410, rect.height + (edge.includes('n') ? -dy : dy)));
+                    const height = Math.min(window.innerHeight - 16, Math.max(280, rect.height + (edge.includes('n') ? -dy : dy)));
                     if (/[ew]/.test(edge)) {
                         panel.style.width = `${width}px`;
                         panel.style.left = `${edge.includes('w') ? rect.right - panel.getBoundingClientRect().width : rect.left}px`;
@@ -592,7 +592,7 @@
                 .timetable-conflict { border: 1px solid #d69e2e; box-shadow: inset 3px 0 #d69e2e; background-image: repeating-linear-gradient(135deg, transparent 0 6px, rgba(236,185,38,0.09) 6px 12px); }
                 .timetable-legend .timetable-conflict { color: #97651c; background-color: #fffaf0; padding-left: 11px; }
                 .timetable-grid { flex: 1; min-height: 0; display: grid; grid-template-columns: repeat(var(--days, 5), minmax(0, 1fr)); gap: 5px; margin-top: 12px; padding: 0 12px; overflow-y: auto; scrollbar-width: thin; scrollbar-color: #cbd5e0 transparent; }
-                .timetable-day { display: grid; min-width: 0; min-height: 546px; grid-template-rows: repeat(5, minmax(0, 1fr)) 7px repeat(5, minmax(0, 1fr)) 7px repeat(4, minmax(0, 1fr)); }
+                .timetable-day { display: grid; min-width: 0; min-height: 364px; grid-template-rows: repeat(5, minmax(0, 1fr)) 7px repeat(5, minmax(0, 1fr)) 7px repeat(4, minmax(0, 1fr)); }
                 .timetable-cell { grid-column: 1; background: rgba(237,242,247,0.55); border-bottom: 1px solid rgba(203,213,224,0.3); }
                 .timetable-cell:first-child { border-radius: 7px 7px 0 0; }
                 .timetable-cell:last-of-type { border-radius: 0 0 7px 7px; }
