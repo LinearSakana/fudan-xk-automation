@@ -25,7 +25,6 @@
         courseConflicts: new Map(), // lessonAssoc -> Array<{ lessonAssoc, lessonNameZh }>
         studentId: '',
         turnId: '',
-        semesterId: '505',
         headers: {}, // 从原始请求中捕获的全局 HTTP 头
         isGrabbing: false,
         skipCaptcha: false, // 是否跳过验证码
