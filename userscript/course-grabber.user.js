@@ -198,7 +198,10 @@
                 if ((current.courseCode && current.courseCode === other.courseCode)
                     || schedulesOverlap(current, other)
                     || (isSportsCourse(current) && isSportsCourse(other))) {
-                    conflicts.push({lessonAssoc: otherId, lessonNameZh: other.lessonNameZh || other.courseName || `Lesson ${otherId}`});
+                    conflicts.push({
+                        lessonAssoc: otherId,
+                        lessonNameZh: other.lessonNameZh || other.courseName || `Lesson ${otherId}`
+                    });
                 }
             }
             return [lessonAssoc, conflicts];
@@ -317,8 +320,8 @@
 
         const confirmButton = document.getElementById('grabber-first-run-confirm');
         const close = () => {
-                localStorage.setItem(FIRST_RUN_NOTICE_KEY, '1');
-                overlay.remove();
+            localStorage.setItem(FIRST_RUN_NOTICE_KEY, '1');
+            overlay.remove();
         };
         confirmButton.addEventListener('click', close);
         overlay.addEventListener('keydown', (event) => {
@@ -434,7 +437,10 @@
                 }
                 const selectedIds = new Set(selected.map(course => Number(course.lessonAssoc)));
                 this.courses = [...new Map([...STATE.courses, ...selected].map(course =>
-                    [Number(course.lessonAssoc), {...course, timetableSelected: selectedIds.has(Number(course.lessonAssoc))}])).values()];
+                    [Number(course.lessonAssoc), {
+                        ...course,
+                        timetableSelected: selectedIds.has(Number(course.lessonAssoc))
+                    }])).values()];
                 this.conflicts = buildCourseConflicts(this.courses, []);
                 this.render();
                 UI.render();
@@ -451,7 +457,8 @@
             this.courses.forEach((course, index) => {
                 const seen = new Set();
                 for (const schedule of course.schedule || []) {
-                    const day = Number(schedule.weekday), start = Number(schedule.startUnit), end = Number(schedule.endUnit);
+                    const day = Number(schedule.weekday), start = Number(schedule.startUnit),
+                        end = Number(schedule.endUnit);
                     if (![day, start, end].every(Number.isInteger) || day < 1 || day > 7 || start < 1 || end > 14 || start > end) continue;
                     scheduled.add(index);
                     for (const [first, last] of [[1, 5], [6, 10], [11, 14]]) {
@@ -474,7 +481,9 @@
                 for (const entry of blocks) {
                     if (entry.start > groupEnd) {
                         finishGroup();
-                        group = []; ends = []; groupEnd = 0;
+                        group = [];
+                        ends = [];
+                        groupEnd = 0;
                     }
                     let lane = ends.findIndex(end => end < entry.start);
                     if (lane < 0) lane = ends.length;
@@ -487,17 +496,17 @@
                 return `<div class="timetable-day" aria-label="${WEEKDAY_LABELS[day]}">
                     ${Array.from({length: 14}, (_, i) => `<div class="timetable-cell" style="grid-row:${row(i + 1)}" aria-hidden="true"></div>`).join('')}
                     ${blocks.map(entry => {
-                        const course = this.courses[entry.index];
-                        const conflict = this.conflicts.get(Number(course.lessonAssoc))?.length;
-                        const name = course.courseName || course.lessonNameZh || `Lesson ${course.lessonAssoc}`;
-                        const code = course.lessonCode || course.courseCode || '待同步';
-                        const label = `${name} ${code}，${WEEKDAY_LABELS[day]} ${entry.start}~${entry.end}节，${course.timetableSelected ? '已选' : '意向'}${conflict ? '，存在冲突' : ''}`;
-                        return `<button class="timetable-course ${course.timetableSelected ? 'timetable-selected' : 'timetable-intended'}${conflict ? ' timetable-conflict' : ''}"
+                    const course = this.courses[entry.index];
+                    const conflict = this.conflicts.get(Number(course.lessonAssoc))?.length;
+                    const name = course.courseName || course.lessonNameZh || `Lesson ${course.lessonAssoc}`;
+                    const code = course.lessonCode || course.courseCode || '待同步';
+                    const label = `${name} ${code}，${WEEKDAY_LABELS[day]} ${entry.start}~${entry.end}节，${course.timetableSelected ? '已选' : '意向'}${conflict ? '，存在冲突' : ''}`;
+                    return `<button class="timetable-course ${course.timetableSelected ? 'timetable-selected' : 'timetable-intended'}${conflict ? ' timetable-conflict' : ''}"
                             data-course-index="${entry.index}" aria-label="${escapeHtml(label)}"
                             style="grid-row:${row(entry.start)} / ${row(entry.end) + 1}; width:calc(${100 / entry.lanes}% - 4px); margin-left:calc(${entry.lane * 100 / entry.lanes}% + 2px)">
                             <span>${escapeHtml(name)}</span><small>${escapeHtml(code)}</small>
                         </button>`;
-                    }).join('')}
+                }).join('')}
                 </div>`;
             }).join('');
             const missing = this.courses.length - scheduled.size;
@@ -713,19 +722,19 @@
                 <div class="hover-row"><div class="hover-key">校区</div><div class="hover-value">${escapeHtml(campusText)}</div></div>
                 <div class="hover-row"><div class="hover-key">容量</div><div class="hover-value">${escapeHtml(limitText)}</div></div>
                 ${timetable ? [
-                    ['教学班', course.lessonCode], ['总学时', course.totalPeriod],
-                    ['授课语言', course.teachLang?.nameZh || course.teachLang?.nameEn],
-                    ['考核方式', course.examMode?.nameZh || course.examMode?.nameEn],
-                    ['开课院系', course.openDepartment?.nameZh || course.openDepartment?.nameEn],
-                    ['课程类别', course.courseTableType?.nameZh || course.courseTableType?.nameEn],
-                ].map(([key, value]) => `<div class="hover-row"><div class="hover-key">${key}</div><div class="hover-value">${escapeHtml(value ?? '待同步')}</div></div>`).join('') : ''}
+                ['教学班', course.lessonCode], ['总学时', course.totalPeriod],
+                ['授课语言', course.teachLang?.nameZh || course.teachLang?.nameEn],
+                ['考核方式', course.examMode?.nameZh || course.examMode?.nameEn],
+                ['开课院系', course.openDepartment?.nameZh || course.openDepartment?.nameEn],
+                ['课程类别', course.courseTableType?.nameZh || course.courseTableType?.nameEn],
+            ].map(([key, value]) => `<div class="hover-row"><div class="hover-key">${key}</div><div class="hover-value">${escapeHtml(value ?? '待同步')}</div></div>`).join('') : ''}
                 ${timetable && course.examDate ? `<div class="hover-row hover-wide"><div class="hover-key">考试时间</div><div class="hover-value">${escapeHtml(course.examDate)}</div></div>` : ''}
                 <div class="hover-row hover-wide"><div class="hover-key">备注</div><div class="hover-value">${escapeHtml(remarkText)}</div></div>
                 </div>
                 <div class="hover-bottom">
                 <div class="hover-schedule"><div class="hover-key">${timetable ? '时间 / 地点' : '时间'}</div><div class="hover-schedule-items">${timetable
-                    ? escapeHtml(course.dateTimePlace) || uniqueNonEmpty((course.schedule || []).map(item => item.dateTimePlace)).map(escapeHtml).join('<br>') || (course.scheduleSummary || []).map(escapeHtml).join('<br>') || '待获取'
-                    : this.formatScheduleDetails(course)}</div></div>
+                ? escapeHtml(course.dateTimePlace) || uniqueNonEmpty((course.schedule || []).map(item => item.dateTimePlace)).map(escapeHtml).join('<br>') || (course.scheduleSummary || []).map(escapeHtml).join('<br>') || '待获取'
+                : this.formatScheduleDetails(course)}</div></div>
                 ${conflicts.length ? `<div class="hover-conflict">⚠️ 当前课程与${conflicts.map(item => escapeHtml(item.lessonNameZh)).join('，')}存在冲突，您可根据自身情况，决定该课程的去留</div>` : ''}
                 </div>
             `;
