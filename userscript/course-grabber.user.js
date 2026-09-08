@@ -427,12 +427,12 @@
             UI.hideHoverCard();
             try {
                 if (!STATE.studentId || !STATE.turnId || !Object.keys(STATE.headers).length) {
-                    throw new Error('请先在选课页面捕获课程信息，再点击刷新');
+                    throw new Error('请先手动点一次选课，捕获状态后再刷新课表');
                 }
                 const studentId = STATE.studentId, turnId = STATE.turnId, headers = STATE.headers;
                 const selected = await ExecutionEngine.querySelectedCourses();
                 if (studentId !== STATE.studentId || turnId !== STATE.turnId || headers !== STATE.headers) {
-                    throw new Error('选课上下文已变更，请重新刷新');
+                    throw new Error('状态已变更，请重新捕获状态后再刷新课表');
                 }
                 const selectedIds = new Set(selected.map(course => Number(course.lessonAssoc)));
                 this.courses = [...new Map([...STATE.courses, ...selected].map(course =>
