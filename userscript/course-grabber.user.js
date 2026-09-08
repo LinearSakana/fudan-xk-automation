@@ -1255,7 +1255,7 @@
             rebuildConflicts();
             return selectedCourses;
         },
-        async syncCoursesStatus() {
+        async syncSelectedCourses() {
             if (!STATE.isGrabbing || this.isSelectedCoursesSyncing) return;
             this.isSelectedCoursesSyncing = true;
             try {
@@ -1470,7 +1470,7 @@
             this.pollGrabStatus().catch(error => {
                 console.error('[抢课助手] 获取服务端状态失败:', error.message || error);
             });
-            this.syncCoursesStatus().catch(error => {
+            this.syncSelectedCourses().catch(error => {
                 console.warn('[抢课助手] 已选课程同步失败:', error.message || error);
             });
             STATE.grabStatusIntvId = setInterval(() => {
@@ -1479,7 +1479,7 @@
                 });
             }, 1000);
             STATE.syncCoursesIntvId = setInterval(() => {
-                this.syncCoursesStatus().catch(error => {
+                this.syncSelectedCourses().catch(error => {
                     console.warn('[抢课助手] 已选课程同步失败:', error.message || error);
                 });
             }, 5000);
