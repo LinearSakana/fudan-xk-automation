@@ -819,12 +819,12 @@
 
             const concurrencySlider = document.getElementById('concurrency-slider');
             if (concurrencySlider && concurrencySlider.value !== STATE.concurrency.toString()) {
-                concurrencySlider.value = STATE.concurrency;
+                concurrencySlider.value = STATE.concurrency.toString();
             }
 
             const concurrencyValue = document.getElementById('concurrency-value');
             if (concurrencyValue && concurrencyValue.textContent !== STATE.concurrency.toString()) {
-                concurrencyValue.textContent = STATE.concurrency;
+                concurrencyValue.textContent = STATE.concurrency.toString();
             }
 
             const rpsText = STATE.rps.toString();
