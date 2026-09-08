@@ -51,7 +51,8 @@
                 if (handledDialogs.has(dialog)) return;
 
                 const result = dialog.querySelector('.el-dialog__body .result-content');
-                if (result?.textContent.trim() !== '可选人数已满，请有余量后再选') return;
+                const resultText = result?.textContent.trim() || '';
+                if (resultText !== '可选人数已满，请有余量后再选' && !resultText.includes('与已选课程时间冲突')) return;
 
                 const closeButton = Array.from(dialog.querySelectorAll('button.el-button.el-button--default[type="button"]'))
                     .find(button => button.textContent.replace(/\s/g, '') === '关闭');
