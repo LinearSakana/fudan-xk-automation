@@ -1280,7 +1280,7 @@
                 for (const course of STATE.courses) {
                     if (
                         course.status === 'success' ||
-                        course.isPaused ||
+                        (course.isPaused && !selectedIds.has(course.lessonAssoc)) ||
                         (!selectedIds.has(course.lessonAssoc) && !conflictIds.has(course.lessonAssoc))
                     ) continue;
                     try {
