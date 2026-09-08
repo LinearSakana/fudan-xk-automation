@@ -692,7 +692,6 @@
                 .hover-schedule-items { color: #4a5568; font-weight: 500; }
             `;
             const styleSheet = document.createElement("style");
-            styleSheet.type = "text/css";
             styleSheet.innerText = styles;
             document.head.appendChild(styleSheet);
         },
