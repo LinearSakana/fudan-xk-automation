@@ -970,7 +970,23 @@
             this.courseListEl.addEventListener('scroll', () => {
                 this.hideHoverCard();
             });
-            document.getElementById('grab-btn').addEventListener('click', async () => {
+            const grabBtn = document.getElementById('grab-btn');
+
+            grabBtn.addEventListener('mouseenter', () => {
+                if (![...STATE.courseConflicts.values()].some(conflicts => conflicts.length > 0)) {
+                    this.hideHoverCard();
+                    return;
+                }
+                const rect = grabBtn.getBoundingClientRect();
+                this.hoverCardEl.innerHTML = '互斥课程可以正常参与抢课 <br><br> 对于每一个已抢到的课程， <br> 与之冲突的其他课程会自动暂停';
+                this.hoverCardEl.classList.add('show');
+                this.hoverCardEl.setAttribute('aria-hidden', 'false');
+                this.positionHoverCard(rect.right, rect.top);
+            });
+
+            grabBtn.addEventListener('mouseleave', () => this.hideHoverCard());
+
+            grabBtn.addEventListener('click', async () => {
                 try {
                     if (STATE.isGrabbing) {
                         await ExecutionEngine.stop();
