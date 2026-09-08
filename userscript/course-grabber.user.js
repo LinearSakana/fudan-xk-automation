@@ -1261,21 +1261,39 @@
             try {
                 const selectedCourses = await this.querySelectedCourses();
                 UI.render();
-                const selectedById = new Map(selectedCourses.map(course => [course.lessonAssoc, course]));
-                const pausedIds = new Set();
+                const selectedById = new Map(selectedCourses.map(c => [c.lessonAssoc, c]));
+                const selectedIds = new Set(
+                    STATE.courses
+                        .filter(c => c.status !== 'success' && selectedById.has(c.lessonAssoc))
+                        .map(c => c.lessonAssoc)
+                );
+                const successIds = new Set([
+                    ...STATE.courses.filter(c => c.status === 'success').map(c => c.lessonAssoc),
+                    ...selectedIds,
+                ]);
+                const conflictIds = new Set(
+                    [...successIds]
+                        .flatMap(id => STATE.courseConflicts.get(id) || [])
+                        .map(c => c.lessonAssoc)
+                );
+                const pausedSelectedIds = new Set();
                 for (const course of STATE.courses) {
-                    if (course.status === 'success' || !selectedById.has(course.lessonAssoc)) continue;
+                    if (
+                        course.status === 'success' ||
+                        course.isPaused ||
+                        (!selectedIds.has(course.lessonAssoc) && !conflictIds.has(course.lessonAssoc))
+                    ) continue;
                     try {
-                        await requestApi('/course/pause', 'POST', {lessonAssoc: course.lessonAssoc});
-                        pausedIds.add(course.lessonAssoc);
+                        const status = await requestApi('/course/pause', 'POST', {lessonAssoc: course.lessonAssoc});
+                        this.syncCoursesFromServer(status?.courses);
+                        if (selectedIds.has(course.lessonAssoc)) pausedSelectedIds.add(course.lessonAssoc);
                     } catch (error) {
-                        console.warn(`[抢课助手] 自动暂停已选课程 ${course.lessonAssoc} 失败:`, error.message || error);
+                        console.warn(`[抢课助手] 自动暂停课程 ${course.lessonAssoc} 失败:`, error.message || error);
                     }
                 }
-                if (!STATE.isGrabbing || pausedIds.size === 0) return;
 
                 STATE.courses = STATE.courses.map(course => {
-                    if (!pausedIds.has(course.lessonAssoc)) return course;
+                    if (!pausedSelectedIds.has(course.lessonAssoc)) return course;
                     STATE.toBeRemoved.add(course.lessonAssoc);
                     return {...course, ...selectedById.get(course.lessonAssoc)};
                 });
@@ -1439,25 +1457,6 @@
                 UI.render();
                 return;
             }
-
-            const conflictingIds = new Set(
-                STATE.courses
-                    .filter(course => course.status === 'success')
-                    .flatMap(course => STATE.courseConflicts.get(course.lessonAssoc) || [])
-                    .map(course => course.lessonAssoc)
-            );
-            const conflictingRunningCourses = STATE.courses.filter(course =>
-                course.status !== 'success' && !course.isPaused && conflictingIds.has(course.lessonAssoc)
-            );
-            for (const course of conflictingRunningCourses) {
-                try {
-                    status = await requestApi('/course/pause', 'POST', {lessonAssoc: course.lessonAssoc});
-                    this.syncCoursesFromServer(status?.courses);
-                } catch (error) {
-                    console.warn(`[抢课助手] 自动暂停互斥课程 ${course.lessonAssoc} 失败:`, error.message || error);
-                }
-            }
-
             STATE.rps = Number(status?.rps || 0);
             STATE.workers = Number(status?.workers || 0);
             if (STATE.isGrabbing && status?.running === false) {
