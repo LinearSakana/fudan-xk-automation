@@ -34,7 +34,7 @@
         rps: 0,
         workers: 0,
         grabStatusIntvId: null,
-        syncCoursesIntvId: null,
+        syncSelectedCoursesIntvId: null,
         toBeRemoved: new Set(),
         serverErrorNoticeKey: '',
         hasFallbackCourse: 0,
@@ -1478,7 +1478,7 @@
                     console.error('[抢课助手] 获取服务端状态失败:', error.message || error);
                 });
             }, 1000);
-            STATE.syncCoursesIntvId = setInterval(() => {
+            STATE.syncSelectedCoursesIntvId = setInterval(() => {
                 this.syncSelectedCourses().catch(error => {
                     console.warn('[抢课助手] 已选课程同步失败:', error.message || error);
                 });
@@ -1489,9 +1489,9 @@
                 clearInterval(STATE.grabStatusIntvId);
                 STATE.grabStatusIntvId = null;
             }
-            if (STATE.syncCoursesIntvId) {
-                clearInterval(STATE.syncCoursesIntvId);
-                STATE.syncCoursesIntvId = null;
+            if (STATE.syncSelectedCoursesIntvId) {
+                clearInterval(STATE.syncSelectedCoursesIntvId);
+                STATE.syncSelectedCoursesIntvId = null;
             }
         },
     };
