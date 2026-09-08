@@ -33,8 +33,8 @@
         concurrency: 2, // 每门课并发实例数量
         rps: 0,
         workers: 0,
-        statusIntervalId: null,
-        selectedCoursesIntervalId: null,
+        grabStatusIntvId: null,
+        syncCoursesIntvId: null,
         toBeRemoved: new Set(),
         serverErrorNoticeKey: '',
         hasFallbackCourse: 0,
@@ -1255,7 +1255,7 @@
             rebuildConflicts();
             return selectedCourses;
         },
-        async syncActuallySelectedCourses() {
+        async syncCoursesStatus() {
             if (!STATE.isGrabbing || this.isSelectedCoursesSyncing) return;
             this.isSelectedCoursesSyncing = true;
             try {
@@ -1450,7 +1450,7 @@
             rebuildConflicts();
             UI.render();
         },
-        async fetchAndRefreshCourseGrabStatus() {
+        async pollGrabStatus() {
             let status = await requestApi('/status', 'GET');
             this.syncCoursesFromServer(status?.courses);
             if (this.handleServerError(status)) {
@@ -1467,31 +1467,31 @@
         },
         startStatusPolling() {
             this.stopStatusPolling();
-            this.fetchAndRefreshCourseGrabStatus().catch(error => {
+            this.pollGrabStatus().catch(error => {
                 console.error('[抢课助手] 获取服务端状态失败:', error.message || error);
             });
-            this.syncActuallySelectedCourses().catch(error => {
+            this.syncCoursesStatus().catch(error => {
                 console.warn('[抢课助手] 已选课程同步失败:', error.message || error);
             });
-            STATE.statusIntervalId = setInterval(() => {
-                this.fetchAndRefreshCourseGrabStatus().catch(error => {
+            STATE.grabStatusIntvId = setInterval(() => {
+                this.pollGrabStatus().catch(error => {
                     console.error('[抢课助手] 获取服务端状态失败:', error.message || error);
                 });
             }, 1000);
-            STATE.selectedCoursesIntervalId = setInterval(() => {
-                this.syncActuallySelectedCourses().catch(error => {
+            STATE.syncCoursesIntvId = setInterval(() => {
+                this.syncCoursesStatus().catch(error => {
                     console.warn('[抢课助手] 已选课程同步失败:', error.message || error);
                 });
             }, 5000);
         },
         stopStatusPolling() {
-            if (STATE.statusIntervalId) {
-                clearInterval(STATE.statusIntervalId);
-                STATE.statusIntervalId = null;
+            if (STATE.grabStatusIntvId) {
+                clearInterval(STATE.grabStatusIntvId);
+                STATE.grabStatusIntvId = null;
             }
-            if (STATE.selectedCoursesIntervalId) {
-                clearInterval(STATE.selectedCoursesIntervalId);
-                STATE.selectedCoursesIntervalId = null;
+            if (STATE.syncCoursesIntvId) {
+                clearInterval(STATE.syncCoursesIntvId);
+                STATE.syncCoursesIntvId = null;
             }
         },
     };
