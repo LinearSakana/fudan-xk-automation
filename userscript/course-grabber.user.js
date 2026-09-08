@@ -107,7 +107,7 @@
         return lessonAssoc > 0 ? lessonAssoc : null;
     }
 
-    function normalizeLessonInfo(lesson) {
+    function normalizeLessonDetails(lesson) {
         const teacherNames = uniqueNonEmpty((lesson.teachers || []).map(t => t.nameZh || t.nameEn));
         const scheduleItems = [];
         (lesson.scheduleGroups || []).forEach((group) => {
@@ -1122,7 +1122,7 @@
                                 });
                         }
                         Persistence.save();
-                        ExecutionEngine.refreshAllCourseDetails();
+                        ExecutionEngine.refreshMissingCourseDetails();
                         UI.render();
                     } catch (e) {
                         console.error('[抢课助手] 解析请求 payload 失败:', e);
@@ -1132,17 +1132,17 @@
                 else if (STATE.isImporting && url.pathname.includes('/api/v1/student/course-select/std-count')) {
                     const lessonIdsParam = url.searchParams.get('lessonIds');
                     if (lessonIdsParam) {
-                        let newCoursesCount = 0;
+                        let importedCount = 0;
                         lessonIdsParam.split(',').forEach(idStr => {
                             const lessonAssoc = normalizeLessonAssoc(idStr);
                             if (lessonAssoc !== null && !STATE.courses.some(c => c.lessonAssoc === lessonAssoc)) {
                                 STATE.courses.push({lessonAssoc, status: 'pending', isPaused: false});
-                                newCoursesCount++;
+                                importedCount++;
                             }
                         });
-                        console.log(`[抢课助手] 导入 ${newCoursesCount} 门新课程 `);
+                        console.log(`[抢课助手] 导入 ${importedCount} 门新课程 `);
                         rebuildConflicts();
-                        if (newCoursesCount > 0) {
+                        if (importedCount > 0) {
                             ExecutionEngine.syncCourseDetails(STATE.courses.map(c => c.lessonAssoc))
                                 .catch((error) => {
                                     console.warn('[抢课助手] 批量课程详情同步失败:', error.message || error);
@@ -1150,7 +1150,7 @@
                         }
                         STATE.isImporting = false; // 导入一次后自动关闭
                         Persistence.save();
-                        ExecutionEngine.refreshAllCourseDetails();
+                        ExecutionEngine.refreshMissingCourseDetails();
                         UI.render();
                     }
                 }
@@ -1171,14 +1171,14 @@
     };
     // --- 抢课执行引擎 ---
     const ExecutionEngine = {
-        isFallbackCourse(course) {
+        isCourseInfoIncomplete(course) {
             return !course.courseName || !Array.isArray(course.teacherNames) || course.teacherNames.length === 0;
         },
-        refreshAllCourseDetails() {
-            if (STATE.courses.some(c => this.isFallbackCourse(c))) {
+        refreshMissingCourseDetails() {
+            if (STATE.courses.some(c => this.isCourseInfoIncomplete(c))) {
                 this.syncCourseDetails(STATE.courses.map(c => c.lessonAssoc))
                     .finally(() => {
-                        STATE.hasIncompleteCourseInfo = STATE.courses.some(c => this.isFallbackCourse(c));
+                        STATE.hasIncompleteCourseInfo = STATE.courses.some(c => this.isCourseInfoIncomplete(c));
                         UI.render();
                     });
             } else {
@@ -1186,7 +1186,7 @@
                 UI.render();
             }
         },
-        async queryLessonInfo(lessonAssocs) {
+        async queryLessonDetails(lessonAssocs) {
             const normalizedIds = uniqueNonEmpty((lessonAssocs || []).map(id => Number(id))).map(id => Number(id)).filter(id => Number.isFinite(id) && id > 0);
             if (normalizedIds.length === 0) return [];
             if (!STATE.studentId || !STATE.turnId || Object.keys(STATE.headers).length === 0) return [];
@@ -1210,11 +1210,11 @@
             const parsed = await response.json().catch(() => ({}));
             const lessons = parsed?.data?.lessons;
             if (parsed.result !== 0 || !Array.isArray(lessons)) return [];
-            return lessons.map(lesson => normalizeLessonInfo(lesson));
+            return lessons.map(lesson => normalizeLessonDetails(lesson));
         },
         async syncCourseDetails(lessonAssocs) {
             const [infos] = await Promise.all([
-                this.queryLessonInfo(lessonAssocs),
+                this.queryLessonDetails(lessonAssocs),
                 this.querySelectedCourses().catch(error => console.warn('[抢课助手] 冲突检查课表同步失败:', error.message || error)),
             ]);
             const infoByLessonAssoc = new Map(infos.map(info => [info.lessonAssoc, info]));
@@ -1244,7 +1244,7 @@
                 throw new Error(parsed?.message || '已选课程响应格式无效');
             }
             const selectedCourses = parsed.data.map(lesson => ({
-                ...normalizeLessonInfo(lesson),
+                ...normalizeLessonDetails(lesson),
                 status: 'success',
                 isPaused: true,
                 selectedConfirmed: true,
@@ -1275,7 +1275,7 @@
                         .flatMap(id => STATE.courseConflicts.get(id) || [])
                         .map(c => c.lessonAssoc)
                 );
-                const pausedSelectedIds = new Set();
+                const confirmedSelectedIds = new Set();
                 for (const course of STATE.courses) {
                     if (
                         course.status === 'success' ||
@@ -1285,14 +1285,14 @@
                     try {
                         const status = await requestApi('/course/pause', 'POST', {lessonAssoc: course.lessonAssoc});
                         this.syncCoursesFromServer(status?.courses);
-                        if (selectedIds.has(course.lessonAssoc)) pausedSelectedIds.add(course.lessonAssoc);
+                        if (selectedIds.has(course.lessonAssoc)) confirmedSelectedIds.add(course.lessonAssoc);
                     } catch (error) {
                         console.warn(`[抢课助手] 自动暂停课程 ${course.lessonAssoc} 失败:`, error.message || error);
                     }
                 }
 
                 STATE.courses = STATE.courses.map(course => {
-                    if (!pausedSelectedIds.has(course.lessonAssoc)) return course;
+                    if (!confirmedSelectedIds.has(course.lessonAssoc)) return course;
                     STATE.toBeRemoved.add(course.lessonAssoc);
                     return {...course, ...selectedById.get(course.lessonAssoc)};
                 });
@@ -1367,7 +1367,7 @@
             STATE.isGrabbing = false;
             STATE.rps = Number(status?.rps || 0);
             STATE.workers = Number(status?.workers || 0);
-            this.stopStatusPolling();
+            this.stopPolling();
             return true;
         },
         async toggleCoursePause(lessonAssoc, pause) {
@@ -1422,7 +1422,7 @@
             STATE.serverErrorNoticeKey = '';
             await requestApi('/start', 'POST', payload);
             STATE.isGrabbing = true;
-            this.startStatusPolling();
+            this.startPolling();
             UI.render();
         },
         async stop() {
@@ -1445,7 +1445,7 @@
                 }
             });
             Persistence.save();
-            this.stopStatusPolling();
+            this.stopPolling();
             rebuildConflicts();
             UI.render();
         },
@@ -1460,12 +1460,12 @@
             STATE.workers = Number(status?.workers || 0);
             if (STATE.isGrabbing && status?.running === false) {
                 STATE.isGrabbing = false;
-                this.stopStatusPolling();
+                this.stopPolling();
             }
             UI.render();
         },
-        startStatusPolling() {
-            this.stopStatusPolling();
+        startPolling() {
+            this.stopPolling();
             this.pollGrabStatus().catch(error => {
                 console.error('[抢课助手] 获取服务端状态失败:', error.message || error);
             });
@@ -1483,7 +1483,7 @@
                 });
             }, 5000);
         },
-        stopStatusPolling() {
+        stopPolling() {
             if (STATE.grabStatusIntvId) {
                 clearInterval(STATE.grabStatusIntvId);
                 STATE.grabStatusIntvId = null;
@@ -1522,7 +1522,7 @@
                     STATE.isGrabbing = false;
                 }
                 if (STATE.isGrabbing) {
-                    ExecutionEngine.startStatusPolling();
+                    ExecutionEngine.startPolling();
                 }
                 UI.render();
             }).catch(() => {
