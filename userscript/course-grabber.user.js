@@ -29,14 +29,14 @@
         courseConflicts: new Map(), // lessonAssoc -> Array<{ lessonAssoc, lessonNameZh }>
         studentId: '',
         turnId: '',
-        headers: {}, // 自动捕获的全局 HTTP 头
+        headers: {}, // 从选课请求捕获并复用的 HTTP headers
         isGrabbing: false,
-        skipCaptcha: false, // 是否跳过验证码
+        skipCaptcha: false,
         isImporting: false,
         concurrency: 2, // 每门课并发实例数量
         rps: 0,
         workers: 0,
-        serverErrorNoticeKey: '',
+        serverErrorNoticeKey: '', // 服务器错误提示的唯一标识
     };
     const WEEKDAY_LABELS = ['', '周一', '周二', '周三', '周四', '周五', '周六', '周日'];
 
@@ -187,7 +187,7 @@
                 return overlaps(left.startUnit, left.endUnit, right.startUnit, right.endUnit);
             })
         );
-        const isSportsCourse = course => (course.courseTableType?.nameZh || '').includes('通识教育专项教育课程：体育');  // 目前仅判断体育课冲突
+        const isSportsCourse = course => (course.courseTableType?.nameZh || '').includes('通识教育专项教育课程：体育');  // 一学期只能修一门体育课
         const candidates = new Map([...courses, ...selectedCourses].map(course => [Number(course.lessonAssoc), course]));
         return new Map([...candidates.values()].map(course => {
             const lessonAssoc = Number(course.lessonAssoc);
@@ -264,7 +264,7 @@
         if (!response.ok) {
             const serverMessage = parsed?.error || parsed?.message;
             const message = [
-                serverMessage || 'API request failed',
+                serverMessage || 'API 请求失败',
                 `${method} ${url}`,
                 `HTTP ${response.status}${response.statusText ? ` ${response.statusText}` : ''}`,
             ].join(' - ');
@@ -387,12 +387,12 @@
             UI.hideHoverCard();
             try {
                 if (!STATE.studentId || !STATE.turnId || !Object.keys(STATE.headers).length) {
-                    throw new Error('请先手动点一次选课，捕获状态后再刷新课表');
+                    throw new Error('请先手动点一次选课，捕获会话状态后再刷新课表');
                 }
                 const studentId = STATE.studentId, turnId = STATE.turnId, headers = STATE.headers;
                 const selected = await ExecutionEngine.refreshSelectedCourses();
                 if (studentId !== STATE.studentId || turnId !== STATE.turnId || headers !== STATE.headers) {
-                    throw new Error('状态已变更，请重新捕获状态后再刷新课表');
+                    throw new Error('会话已变更，请重新捕获会话状态后再刷新课表');
                 }
                 const selectedIds = new Set(selected.map(course => Number(course.lessonAssoc)));
                 this.courses = [...new Map([...STATE.courses, ...selected].map(course =>
@@ -405,7 +405,7 @@
                 UI.render();
             } catch (error) {
                 if (error.status === 401) {
-                    alert('未登录或状态已过期，请重置状态后再试');
+                    alert('选课会话已过期，请重置会话后再试');
                 }
                 message.textContent = `${error.message || error}${this.courses.length ? '（保留上次课表）' : ''}`;
             } finally {
@@ -578,7 +578,7 @@
             const studentIdText = STATE.studentId ? STATE.studentId : '未捕获';
             if (studentIdEl) {
                 if (STATE.courses.some(course => ExecutionEngine.isCourseInfoIncomplete(course))) {
-                    studentIdEl.textContent = '状态已过期';
+                    studentIdEl.textContent = '会话已过期';
                 } else {
                     studentIdEl.textContent = 'ID: ' + studentIdText;
                 }
@@ -841,7 +841,7 @@
                     return;
                 }
                 SessionStore.reset();
-                console.log('[选课助手] 上下文信息已重置 ');
+                console.log('[选课助手] 选课会话信息已重置');
             });
             this.elements['import-btn'].addEventListener('click', () => {
                 if (STATE.isGrabbing) {
@@ -849,7 +849,7 @@
                     return;
                 }
                 SettingsStore.update({isImporting: true});
-                alert('导入模式已开启！请在选课页面进行一次翻页或筛选操作，脚本即自动捕获当前页所有课程 ');
+                alert('导入模式已开启！请在选课页面进行一次翻页或筛选操作，脚本即自动捕获当前页所有课程');
             });
         }
     };
@@ -905,7 +905,7 @@
         },
     };
 
-    // 请求头发生变化时，旧请求将失效
+    // 保存从选课请求中捕获的会话上下文；切换选课轮次后需要重新捕获
     const SessionStore = {
         capture(studentId, turnId, headers) {
             if (studentId == null || turnId == null) throw new Error('选课请求缺少会话信息');
@@ -947,7 +947,7 @@
             try {
                 localStorage.setItem(STORAGE_KEY, JSON.stringify(dataToSave));
             } catch (error) {
-                console.warn('[选课助手] 保存状态失败:', error.message || error);
+                console.warn('[选课助手] 保存配置到本地失败:', error.message || error);
             }
         },
         load() {
@@ -959,7 +959,7 @@
                 if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)
                     || (parsed.version != null && parsed.version !== 1)
                     || !Array.isArray(parsed.courses)) {
-                    throw new Error('保存的状态格式无效或版本不受支持');
+                    throw new Error('保存的配置格式无效或版本不受支持');
                 }
                 const seen = new Set();
                 STATE.courses = parsed.courses.filter(course => course && typeof course === 'object').map(course => {
@@ -984,7 +984,7 @@
                 STATE.skipCaptcha = parsed.skipCaptcha === true;
                 STATE.concurrency = normalizeConcurrency(parsed.concurrency);
             } catch (error) {
-                console.warn('[选课助手] 无法恢复保存的状态，使用默认状态:', error.message || error);
+                console.warn('[选课助手] 无法恢复保存的配置，使用缺省值:', error.message || error);
             }
         }
     };
@@ -1009,7 +1009,8 @@
         },
     };
 
-    // 内部状态记录不直接挂载到页面的 XHR 实例上 ---
+    // --- XHR 拦截 ---
+    // 内部记录不直接挂载到页面的 XHR 实例上
     const XHRInterceptor = {
         uninstall: null,
         init() {
@@ -1270,7 +1271,7 @@
         async start() {
             this.serverStatusRevision++;
             if (!STATE.studentId || !STATE.turnId || Object.keys(STATE.headers).length === 0) {
-                alert('上下文信息不完整，请先在网页上进行一次手动选课操作以自动捕获');
+                alert('选课会话信息不完整，请先在网页上进行一次手动选课操作');
                 return;
             }
             if (STATE.courses.length === 0) {

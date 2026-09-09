@@ -43,11 +43,11 @@
                     color: #4a5568;
                 ">
                     <p>初次见面，先确认一下本地服务是否正常运行（默认地址为 <code>127.0.0.1:30522</code>）</p>
-                    <p>出现下列情况，需要<b>重置状态，并手动发起一次选课操作</b>：</p>
+                    <p>出现下列情况，需要<b>重置会话，并手动发起一次选课操作</b>：</p>
                     <ol style="padding-left: 22px;">
                         <li>首次打开或长时间未使用选课页面</li>
                         <li>曾在其他标签页打开选课页面</li>
-                        <li>悬浮窗右上角持续提示“状态已过期”</li>
+                        <li>悬浮窗右上角持续提示“会话已过期”</li>
                         <li>其他任何奇怪现象</li>
                     </ol>
                     <p>以防万一，抢课开始前也可以主动重置一次。</p>
@@ -103,8 +103,8 @@
                     </div>
                     <ul id="course-list" aria-label="意向课程"></ul>
                     <div class="grabber-sub-actions">
-                        <button id="import-btn" class="btn-secondary" title="从页面自动捕获课程">导入页面</button>
-                        <button id="reset-btn" class="btn-secondary" title="清除学号等上下文">重置状态</button>
+                        <button id="import-btn" class="btn-secondary" title="从当前页面批量捕获课程">批量导入</button>
+                        <button id="reset-btn" class="btn-secondary" title="清除当前选课会话状态">重置会话</button>
                         <button id="clear-btn" class="btn-secondary danger" title="清空全部意向课程">清空列表</button>
                     </div>
                     <div class="grabber-actions">
@@ -114,7 +114,7 @@
                         <label class="checkbox-label" title="跳过滑动验证码（按需设置）">
                             <input type="checkbox" id="skip-captcha-checkbox">
                             <span class="checkmark"></span>
-                            跳过验证
+                            跳过验证码
                         </label>
                     </div>
                 </div>
