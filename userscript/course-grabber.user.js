@@ -932,8 +932,8 @@
         },
         addEventListeners() {
             document.getElementById('timetable-btn').addEventListener('click', () => Timetable.open());
-            let draggingIndex = null;
 
+            let draggingIndex = null;
             const clearDragIndicators = () => {
                 this.courseListEl.querySelectorAll(
                     '.course-dragging, .course-drag-over-before, .course-drag-over-after'
@@ -945,7 +945,6 @@
                     );
                 });
             };
-
             this.courseListEl.addEventListener('dragstart', (e) => {
                 const handle = e.target.closest('.course-drag-handle');
                 const li = handle?.closest('li[data-index]');
@@ -963,7 +962,6 @@
                     e.dataTransfer.setData('text/plain', String(draggingIndex));
                 }
             });
-
             this.courseListEl.addEventListener('dragover', (e) => {
                 if (draggingIndex === null || STATE.isGrabbing) return;
 
@@ -1018,7 +1016,6 @@
                 draggingIndex = null;
                 clearDragIndicators();
             });
-
             this.courseListEl.addEventListener('dragend', () => {
                 draggingIndex = null;
                 clearDragIndicators();
@@ -1078,8 +1075,8 @@
             this.courseListEl.addEventListener('scroll', () => {
                 this.hideHoverCard();
             });
-            const grabBtn = document.getElementById('grab-btn');
 
+            const grabBtn = document.getElementById('grab-btn');
             grabBtn.addEventListener('mouseenter', () => {
                 if (![...STATE.courseConflicts.values()].some(conflicts => conflicts.length > 0)) {
                     this.hideHoverCard();
@@ -1091,9 +1088,7 @@
                 this.hoverCardEl.setAttribute('aria-hidden', 'false');
                 this.positionHoverCard(rect.right, rect.top);
             });
-
             grabBtn.addEventListener('mouseleave', () => this.hideHoverCard());
-
             grabBtn.addEventListener('click', async () => {
                 try {
                     if (STATE.isGrabbing) {
@@ -1105,6 +1100,7 @@
                     alert(`请求本地服务失败: ${error.message || error}`);
                 }
             });
+
             document.getElementById('skip-captcha-checkbox').addEventListener('change', (e) => {
                 STATE.skipCaptcha = e.target.checked;
                 Persistence.save();
