@@ -548,26 +548,20 @@
             this.hoverCourseIndex = -1;
         },
         makeDraggable(element, handle) {
-            let pos1 = 0, pos2 = 0, pos3 = 0, pos4 = 0;
-            handle.onmousedown = (e) => {
-                if (e.button !== 0 || e.target.closest('button')) return;
-                e.preventDefault();
-                pos3 = e.clientX;
-                pos4 = e.clientY;
-                document.onmouseup = () => {
-                    document.onmouseup = null;
-                    document.onmousemove = null;
+            handle.style.touchAction = 'none';
+            handle.addEventListener('pointerdown', event => {
+                if (event.button !== 0 || event.target.closest('button')) return;
+                event.preventDefault();
+                const left = element.offsetLeft, top = element.offsetTop;
+                const move = current => {
+                    if (current.pointerId !== event.pointerId) return;
+                    element.style.left = `${left + current.clientX - event.clientX}px`;
+                    element.style.top = `${top + current.clientY - event.clientY}px`;
                 };
-                document.onmousemove = (e) => {
-                    e.preventDefault();
-                    pos1 = pos3 - e.clientX;
-                    pos2 = pos4 - e.clientY;
-                    pos3 = e.clientX;
-                    pos4 = e.clientY;
-                    element.style.top = (element.offsetTop - pos2) + "px";
-                    element.style.left = (element.offsetLeft - pos1) + "px";
-                };
-            };
+                handle.setPointerCapture(event.pointerId);
+                handle.addEventListener('pointermove', move);
+                handle.addEventListener('lostpointercapture', () => handle.removeEventListener('pointermove', move), {once: true});
+            });
         },
         render() {
             if (!this.courseListEl) return;
