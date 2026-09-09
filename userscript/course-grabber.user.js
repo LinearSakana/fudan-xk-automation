@@ -569,6 +569,12 @@
         },
         render() {
             if (!this.courseListEl) return;
+            this.renderSession();
+            this.renderMetrics();
+            this.renderCourses();
+            this.renderControls();
+        },
+        renderSession() {
             const studentIdEl = document.getElementById('header-student-id');
             const studentIdText = STATE.studentId ? STATE.studentId : '未捕获';
             if (studentIdEl) {
@@ -595,6 +601,8 @@
 
             this.updateConcurrencyTooltip();
 
+        },
+        renderMetrics() {
             const rpsText = STATE.rps.toString();
             const rpsEl = document.getElementById('rps-value');
             if (rpsEl && rpsEl.textContent !== rpsText) {
@@ -606,6 +614,8 @@
                 workersEl.textContent = workersText;
             }
 
+        },
+        renderCourses() {
             const markup = STATE.courses.map((course, index) => {
                 const classes = [
                     STATE.courseConflicts.get(Number(course.lessonAssoc))?.length ? 'course-conflict' : '',
@@ -622,6 +632,9 @@
                 this.hideHoverCard();
             }
 
+        },
+        renderControls() {
+            const resetBtn = document.getElementById('reset-btn');
             const grabBtn = document.getElementById('grab-btn');
             const importBtn = document.getElementById('import-btn');
             const clearBtn = document.getElementById('clear-btn');
