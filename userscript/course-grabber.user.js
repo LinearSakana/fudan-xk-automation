@@ -671,10 +671,10 @@
                 .checkmark { width: 16px; height: 16px; border: 2px solid #cbd5e0; border-radius: 4px; display: inline-block; position: relative; transition: all 0.2s; }
                 .checkbox-label input:checked + .checkmark { background: #3182ce; border-color: #3182ce; }
                 .checkbox-label input:checked + .checkmark::after { content: ''; position: absolute; left: 4px; top: 1px; width: 4px; height: 8px; border: solid white; border-width: 0 2px 2px 0; transform: rotate(45deg); }
-                .rps-display { display: grid; flex-shrink: 0; overflow: hidden; padding: 4px 8px; border: 1px solid #e2e8f0; border-radius: 9px; background: linear-gradient(135deg, #f7fafc, #edf2f7); color: #718096; font-size: 11px; line-height: 18px; }
+                .rps-display { display: grid; box-sizing: border-box; flex: 0 0 100px; min-width: 0; overflow: hidden; padding: 4px 8px; border: 1px solid #e2e8f0; border-radius: 9px; background: linear-gradient(135deg, #f7fafc, #edf2f7); color: #718096; font-size: 11px; line-height: 18px; }
                 .grabber-metric { grid-area: 1 / 1; display: flex; align-items: center; justify-content: space-between; gap: 6px; white-space: nowrap; animation: grabber-metric-cycle 6s ease-in-out infinite; }
                 .grabber-metric:nth-child(2) { animation-delay: -3s; }
-                #rps-value, #workers-value { color: #2b6cb0; font-weight: 600; font-variant-numeric: tabular-nums; }
+                #rps-value, #workers-value { min-width: 0; overflow: hidden; text-overflow: ellipsis; color: #2b6cb0; font-weight: 600; font-variant-numeric: tabular-nums; }
                 @keyframes grabber-metric-cycle {
                     0%, 42%, 100% { opacity: 1; transform: translateY(0); }
                     50% { opacity: 0; transform: translateY(-12px); }
@@ -683,8 +683,8 @@
                 @media (prefers-reduced-motion: reduce) {
                     .grabber-metric { grid-area: auto; animation: none; }
                 }
-                .grabber-slider-group { display: flex; align-items: center; gap: 10px; padding: 6px 8px }
-                #concurrency-num { font-size: 13px; color: #4a5568; white-space: nowrap; }
+                .grabber-slider-group { display: flex; align-items: center; gap: 10px; padding: 14px 0 2px; }
+                #concurrency-num { flex-shrink: 0; font-size: 12px; color: #4a5568; white-space: nowrap; }
                 .concurrency-range { position: relative; flex: 1; min-width: 0; display: flex; align-items: center; height: 24px; --thumb-size: 14px; }
                 #concurrency-slider { appearance: none; width: 100%; margin: 0; height: 6px; border-radius: 3px; background: #e2e8f0; cursor: pointer; }
                 #concurrency-slider::-webkit-slider-thumb { appearance: none; width: var(--thumb-size); height: var(--thumb-size); border: 2px solid white; border-radius: 50%; background: #3182ce; box-shadow: 0 1px 4px rgba(43,108,176,.3); }
