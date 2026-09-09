@@ -1006,7 +1006,7 @@
             }
         },
         async queryLessonDetails(lessonAssocs) {
-            const normalizedIds = uniqueNonEmpty((lessonAssocs || []).map(id => Number(id))).map(id => Number(id)).filter(id => Number.isFinite(id) && id > 0);
+            const normalizedIds = [...new Set((lessonAssocs || []).map(normalizeLessonAssoc).filter(id => id !== null))];
             if (normalizedIds.length === 0) return [];
             if (!STATE.studentId || !STATE.turnId || Object.keys(STATE.headers).length === 0) return [];
             const payload = {
