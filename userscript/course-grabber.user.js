@@ -660,9 +660,16 @@
                 #course-list { list-style: none; padding: 0; margin: 0; max-height: 380px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; scrollbar-width: thin; scrollbar-color: #cbd5e0 transparent; }
                 #course-list::-webkit-scrollbar { width: 6px; }
                 #course-list::-webkit-scrollbar-thumb { background-color: #cbd5e0; border-radius: 10px; }
-                #course-list li { display: flex; align-items: center; padding: 10px 12px; border: 1px solid #e2e8f0; border-radius: 10px; background: #ffffff; transition: all 0.2s ease; }
+                #course-list li { position: relative; display: flex; align-items: center; padding: 10px 12px; border: 1px solid #e2e8f0; border-radius: 10px; background: #ffffff; transition: all 0.2s ease; }
                 #course-list li:hover { transform: translateY(-1px); border-color: #cbd5e0; box-shadow: 0 4px 12px rgba(0,0,0,0.05); }
                 #course-list li.course-paused { background: #f7fafc; opacity: 0.7; }
+                #course-list li.course-dragging { opacity: 0.4; transform: none; }
+                #course-list li.course-drag-over-before::before,
+                #course-list li.course-drag-over-after::after { content: ''; position: absolute; left: 6px; right: 6px; height: 2px; background: #3182ce; border-radius: 2px; pointer-events: none; }
+                #course-list li.course-drag-over-before::before { top: -5px; }
+                #course-list li.course-drag-over-after::after { bottom: -5px; }
+                .course-drag-handle { flex-shrink: 0; margin-right: 8px; color: #a0aec0; cursor: grab; user-select: none; font-size: 16px; line-height: 1; }
+                .course-drag-handle:active { cursor: grabbing; }
                 #course-list li.course-conflict { position: relative; }
                 #course-list li.course-conflict::after { content: ''; position: absolute; inset: 0; border-radius: inherit; pointer-events: none; background: repeating-linear-gradient(135deg, rgba(25, 25, 25, 0.045) 0 6px, rgba(236, 185, 38, 0.10) 6px 12px); }
                 .course-hover-card .hover-conflict { width: fit-content; max-width: 240px; box-sizing: border-box; margin-top: 10px; padding: 8px 10px; border: 1px solid #f3dfad; border-radius: 8px; background: #fffaf0; color: #97651c; font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
@@ -885,6 +892,7 @@
                     }
 
                     li.innerHTML = `
+                        ${STATE.isGrabbing ? '' : `<span class="course-drag-handle" draggable="true" title="拖动排序" aria-label="拖动 ${escapeHtml(courseName)} 排序">⋮⋮</span>`}
                         <div class="course-main">
                             <div class="course-title" title="${escapeHtml(courseName)}">${escapeHtml(courseName)}</div>
                             <div class="course-teachers" title="${escapeHtml(teachersText)}">${escapeHtml(teachersText)}</div>
@@ -924,6 +932,97 @@
         },
         addEventListeners() {
             document.getElementById('timetable-btn').addEventListener('click', () => Timetable.open());
+            let draggingIndex = null;
+
+            const clearDragIndicators = () => {
+                this.courseListEl.querySelectorAll(
+                    '.course-dragging, .course-drag-over-before, .course-drag-over-after'
+                ).forEach(el => {
+                    el.classList.remove(
+                        'course-dragging',
+                        'course-drag-over-before',
+                        'course-drag-over-after'
+                    );
+                });
+            };
+
+            this.courseListEl.addEventListener('dragstart', (e) => {
+                const handle = e.target.closest('.course-drag-handle');
+                const li = handle?.closest('li[data-index]');
+                if (!li || STATE.isGrabbing) {
+                    e.preventDefault();
+                    return;
+                }
+
+                draggingIndex = Number(li.dataset.index);
+                li.classList.add('course-dragging');
+                this.hideHoverCard();
+
+                if (e.dataTransfer) {
+                    e.dataTransfer.effectAllowed = 'move';
+                    e.dataTransfer.setData('text/plain', String(draggingIndex));
+                }
+            });
+
+            this.courseListEl.addEventListener('dragover', (e) => {
+                if (draggingIndex === null || STATE.isGrabbing) return;
+
+                const li = e.target.closest('li[data-index]');
+                if (!li || !this.courseListEl.contains(li)) return;
+
+                e.preventDefault();
+                if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
+
+                this.courseListEl.querySelectorAll(
+                    '.course-drag-over-before, .course-drag-over-after'
+                ).forEach(el => {
+                    el.classList.remove('course-drag-over-before', 'course-drag-over-after');
+                });
+
+                const rect = li.getBoundingClientRect();
+                li.classList.add(
+                    e.clientY < rect.top + rect.height / 2
+                        ? 'course-drag-over-before'
+                        : 'course-drag-over-after'
+                );
+            });
+
+            this.courseListEl.addEventListener('drop', (e) => {
+                if (draggingIndex === null || STATE.isGrabbing) return;
+
+                const li = e.target.closest('li[data-index]');
+                if (!li || !this.courseListEl.contains(li)) return;
+
+                e.preventDefault();
+
+                const targetIndex = Number(li.dataset.index);
+                const rect = li.getBoundingClientRect();
+                let insertIndex = targetIndex +
+                    (e.clientY >= rect.top + rect.height / 2 ? 1 : 0);
+
+                const fromIndex = draggingIndex;
+
+                if (fromIndex < insertIndex) {
+                    insertIndex--;
+                }
+
+                if (fromIndex !== insertIndex) {
+                    const [course] = STATE.courses.splice(fromIndex, 1);
+                    STATE.courses.splice(insertIndex, 0, course);
+
+                    Persistence.save();
+                    rebuildConflicts();
+                    this.render();
+                }
+
+                draggingIndex = null;
+                clearDragIndicators();
+            });
+
+            this.courseListEl.addEventListener('dragend', () => {
+                draggingIndex = null;
+                clearDragIndicators();
+            });
             this.courseListEl.addEventListener('click', async (e) => {
                 const target = e.target.closest('button');
                 if (!target) return;
