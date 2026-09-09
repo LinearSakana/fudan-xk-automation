@@ -571,7 +571,7 @@
                             <span id="concurrency-value" class="concurrency-tooltip" aria-hidden="true">2</span>
                         </div>
                         <div class="rps-display" title="本地服务状态">
-                            <span class="grabber-metric">RPS <span id="rps-value">0</span></span>
+                            <span class="grabber-metric">Req/s <span id="rps-value">0</span></span>
                             <span class="grabber-metric">Workers <span id="workers-value">0</span></span>
                         </div>
                     </div>
