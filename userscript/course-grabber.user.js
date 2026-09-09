@@ -841,7 +841,7 @@
                     return;
                 }
                 SessionStore.reset();
-                console.log('[抢课助手] 上下文信息已重置 ');
+                console.log('[选课助手] 上下文信息已重置 ');
             });
             this.elements['import-btn'].addEventListener('click', () => {
                 if (STATE.isGrabbing) {
@@ -947,7 +947,7 @@
             try {
                 localStorage.setItem(STORAGE_KEY, JSON.stringify(dataToSave));
             } catch (error) {
-                console.warn('[抢课助手] 保存状态失败:', error.message || error);
+                console.warn('[选课助手] 保存状态失败:', error.message || error);
             }
         },
         load() {
@@ -984,7 +984,7 @@
                 STATE.skipCaptcha = parsed.skipCaptcha === true;
                 STATE.concurrency = normalizeConcurrency(parsed.concurrency);
             } catch (error) {
-                console.warn('[抢课助手] 无法恢复保存的状态，使用默认状态:', error.message || error);
+                console.warn('[选课助手] 无法恢复保存的状态，使用默认状态:', error.message || error);
             }
         }
     };
@@ -1002,7 +1002,7 @@
         importLessons(ids) {
             if (!STATE.isImporting) return;
             const importedCount = CourseStore.add(ids);
-            console.log(`[抢课助手] 导入 ${importedCount} 门新课程`);
+            console.log(`[选课助手] 导入 ${importedCount} 门新课程`);
             SettingsStore.update({isImporting: false});
             ExecutionEngine.refreshMissingCourseDetails();
             UI.render();
@@ -1044,7 +1044,7 @@
                                 if (ids) CapturedRequests.importLessons(ids.split(','));
                             }
                         } catch (error) {
-                            console.warn('[抢课助手] 无法处理捕获的请求:', error.message || error);
+                            console.warn('[选课助手] 无法处理捕获的请求:', error.message || error);
                         }
                     }
                     return originals.send.apply(this, arguments);
@@ -1084,7 +1084,7 @@
             try {
                 await this.syncCourseDetails(ids);
             } catch (error) {
-                console.warn('[抢课助手] 课程详情同步失败:', error.message || error);
+                console.warn('[选课助手] 课程详情同步失败:', error.message || error);
             }
         },
         async queryLessonDetails(lessonAssocs) {
@@ -1115,7 +1115,7 @@
             const headers = STATE.headers;
             const [infos] = await Promise.all([
                 this.queryLessonDetails(lessonAssocs),
-                this.refreshSelectedCourses().catch(error => console.warn('[抢课助手] 冲突检查课表同步失败:', error.message || error)),
+                this.refreshSelectedCourses().catch(error => console.warn('[选课助手] 冲突检查课表同步失败:', error.message || error)),
             ]);
             if (STATE.headers !== headers) return [];
             CourseStore.updateDetails(infos);
@@ -1183,7 +1183,7 @@
                         this.syncCoursesFromServer(status?.courses);
                         if (selectedIds.has(course.lessonAssoc)) confirmedSelectedIds.add(course.lessonAssoc);
                     } catch (error) {
-                        console.warn(`[抢课助手] 自动暂停课程 ${course.lessonAssoc} 失败:`, error.message || error);
+                        console.warn(`[选课助手] 自动暂停课程 ${course.lessonAssoc} 失败:`, error.message || error);
                     }
                 }
 
@@ -1285,7 +1285,7 @@
                 removeAfterStop: false,
             })));
             await this.syncCourseDetails(STATE.courses.map(c => c.lessonAssoc)).catch(error => {
-                console.warn('[抢课助手] 抢课前详情同步失败，继续使用已有信息:', error.message || error);
+                console.warn('[选课助手] 抢课前详情同步失败，继续使用已有信息:', error.message || error);
             });
             const courses = getCoursePayload();
             const runnableCount = courses.filter(course => !course.isPaused).length;
@@ -1358,7 +1358,7 @@
                 try {
                     await this[method](generation);
                 } catch (error) {
-                    if (generation === this.pollGeneration) console.warn(`[抢课助手] ${label}:`, error.message || error);
+                    if (generation === this.pollGeneration) console.warn(`[选课助手] ${label}:`, error.message || error);
                 } finally {
                     if (generation === this.pollGeneration && STATE.isGrabbing) {
                         const timer = setTimeout(() => {
@@ -1381,13 +1381,13 @@
     };
 
     function init() {
-        console.log('[抢课助手] 脚本已启动 ');
+        console.log('[选课助手] 脚本已启动 ');
         watchDialog();
         Persistence.load();
         let uiMounted = false;
         const runInitialCourseSync = () => {
             if (uiMounted && STATE.courses.length > 0 && STATE.studentId && STATE.turnId && Object.keys(STATE.headers).length > 0) {
-                ExecutionEngine.syncCourseDetails(STATE.courses.map(c => c.lessonAssoc)).catch(err => console.warn('[抢课助手] 初始化课程详情同步失败:', err.message || err));
+                ExecutionEngine.syncCourseDetails(STATE.courses.map(c => c.lessonAssoc)).catch(err => console.warn('[选课助手] 初始化课程详情同步失败:', err.message || err));
             }
         };
         const mountUi = async () => {
@@ -1399,7 +1399,7 @@
                 runInitialCourseSync();
             } else {
                 ExecutionEngine.refreshSelectedCourses().then(() => UI.render())
-                    .catch(err => console.warn('[抢课助手] 初始化课表同步失败:', err.message || err));
+                    .catch(err => console.warn('[选课助手] 初始化课表同步失败:', err.message || err));
             }
             showFirstRunNotice();
             const revision = ExecutionEngine.serverStatusRevision;
@@ -1417,7 +1417,7 @@
                 }
                 UI.render();
             }).catch(error => {
-                console.warn('[抢课助手] 无法连接本地服务:', error.message || error);
+                console.warn('[选课助手] 无法连接本地服务:', error.message || error);
             });
         };
         if (document.readyState === 'loading') {
