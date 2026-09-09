@@ -468,8 +468,7 @@
         hoverCardEl: null,
         hoverTriggerEl: null,
         hoverCourseIndex: -1,
-        lastRenderState: null,
-        lastButtonsState: null,
+        lastCourseMarkup: null,
         updateConcurrencyTooltip() {
             const slider = document.getElementById('concurrency-slider');
             if (!slider) return;
@@ -531,11 +530,9 @@
                 this.hoverTriggerEl = trigger;
                 this.hoverTriggerEl?.setAttribute('aria-describedby', this.hoverCardEl.id);
             }
-            if (this.hoverCourseIndex !== index) {
-                this.hoverCardEl.classList.toggle('hover-timetable', timetable);
-                this.hoverCardEl.innerHTML = this.buildCourseHoverCard(course, conflicts, timetable);
-                this.hoverCourseIndex = index;
-            }
+            this.hoverCardEl.classList.toggle('hover-timetable', timetable);
+            this.hoverCardEl.innerHTML = this.buildCourseHoverCard(course, conflicts, timetable);
+            this.hoverCourseIndex = index;
             this.hoverCardEl.classList.add('show');
             this.hoverCardEl.setAttribute('aria-hidden', 'false');
             this.positionHoverCard(clientX, clientY);
@@ -609,60 +606,44 @@
                 workersEl.textContent = workersText;
             }
 
-            // --- 课程列表缓存 ---
-            const currentCoursesState = STATE.courses.map(c =>
-                `${c.lessonAssoc}|${c.status}|${c.isPaused}|${c.courseName}|${c.teacherNames?.join(',')}`
-            ).join(';') + `|isGrabbing:${STATE.isGrabbing}|conflicts:${JSON.stringify([...STATE.courseConflicts])}`;
-
-            if (this.lastRenderState !== currentCoursesState) {
-                this.lastRenderState = currentCoursesState;
-                this.courseListEl.innerHTML = '';
-
-                const fragment = document.createDocumentFragment();
-                STATE.courses.forEach((course, index) => {
-                    const li = document.createElement('li');
-                    li.dataset.index = String(index);
-                    if (STATE.courseConflicts.get(Number(course.lessonAssoc))?.length) {
-                        li.classList.add('course-conflict');
-                    }
-                    if (course.status === 'paused' && STATE.isGrabbing) {
-                        li.classList.add('course-paused');
-                    }
-                    li.innerHTML = UI_ASSETS.courseListItem({...course, status: isCourseSuccessful(course) ? 'success' : 'pending', isPaused: course.status === 'paused'}, index, STATE.isGrabbing, escapeHtml);
-                    fragment.appendChild(li);
-                });
-                this.courseListEl.appendChild(fragment);
+            const markup = STATE.courses.map((course, index) => {
+                const classes = [
+                    STATE.courseConflicts.get(Number(course.lessonAssoc))?.length ? 'course-conflict' : '',
+                    course.status === 'paused' && STATE.isGrabbing ? 'course-paused' : '',
+                ].filter(Boolean).join(' ');
+                // Keep the UI resource contract compatible with the existing remote asset.
+                const view = {...course, status: isCourseSuccessful(course) ? 'success' : 'pending', isPaused: course.status === 'paused'};
+                return `<li data-index="${index}" class="${classes}">${UI_ASSETS.courseListItem(view, index, STATE.isGrabbing, escapeHtml)}</li>`;
+            }).join('');
+            // Preserve focused buttons, hover and native dragging on metric-only updates.
+            if (this.lastCourseMarkup !== markup) {
+                this.courseListEl.innerHTML = markup;
+                this.lastCourseMarkup = markup;
                 this.hideHoverCard();
             }
 
-            // --- 按钮状态缓存 ---
-            const currentButtonsState = `${STATE.isGrabbing}|${STATE.isImporting}|${ExecutionEngine.isCommandPending}`;
-            if (this.lastButtonsState !== currentButtonsState) {
-                this.lastButtonsState = currentButtonsState;
-                const grabBtn = document.getElementById('grab-btn');
-                const importBtn = document.getElementById('import-btn');
-                const resetBtn = document.getElementById('reset-btn');
-                const clearBtn = document.getElementById('clear-btn');
+            const grabBtn = document.getElementById('grab-btn');
+            const importBtn = document.getElementById('import-btn');
+            const clearBtn = document.getElementById('clear-btn');
 
-                if (STATE.isGrabbing) {
-                    grabBtn.textContent = '停止抢课';
-                    grabBtn.classList.add('grabbing');
-                    importBtn.disabled = true;
-                    resetBtn.disabled = true;
-                    clearBtn.disabled = true;
-                } else {
-                    grabBtn.textContent = '开始抢课';
-                    grabBtn.classList.remove('grabbing');
-                    importBtn.disabled = STATE.isImporting;
-                    resetBtn.disabled = false;
-                    clearBtn.disabled = false;
-                }
-                grabBtn.disabled = ExecutionEngine.isCommandPending;
-                if (ExecutionEngine.isCommandPending) {
-                    importBtn.disabled = resetBtn.disabled = clearBtn.disabled = true;
-                }
-                importBtn.textContent = STATE.isImporting ? '正在导入...' : '导入页面';
+            if (STATE.isGrabbing) {
+                grabBtn.textContent = '停止抢课';
+                grabBtn.classList.add('grabbing');
+                importBtn.disabled = true;
+                resetBtn.disabled = true;
+                clearBtn.disabled = true;
+            } else {
+                grabBtn.textContent = '开始抢课';
+                grabBtn.classList.remove('grabbing');
+                importBtn.disabled = STATE.isImporting;
+                resetBtn.disabled = false;
+                clearBtn.disabled = false;
             }
+            grabBtn.disabled = ExecutionEngine.isCommandPending;
+            if (ExecutionEngine.isCommandPending) {
+                importBtn.disabled = resetBtn.disabled = clearBtn.disabled = true;
+            }
+            importBtn.textContent = STATE.isImporting ? '正在导入...' : '导入页面';
         },
         addEventListeners() {
             document.getElementById('timetable-btn').addEventListener('click', () => Timetable.open());
