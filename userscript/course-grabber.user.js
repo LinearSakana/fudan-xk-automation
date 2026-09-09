@@ -683,7 +683,7 @@
                 @media (prefers-reduced-motion: reduce) {
                     .grabber-metric { grid-area: auto; animation: none; }
                 }
-                .grabber-slider-group { display: flex; align-items: center; gap: 8px; padding: 8px 0 0; }
+                .grabber-slider-group { display: flex; align-items: center; gap: 8px; padding: 0 0 6px; }
                 #concurrency-num { flex-shrink: 0; font-size: 12px; color: #4a5568; white-space: nowrap; }
                 .concurrency-range { position: relative; flex: 1; min-width: 0; display: flex; align-items: center; height: 22px; --thumb-size: 14px; }
                 #concurrency-slider { appearance: none; width: 100%; margin: 0; height: 6px; border-radius: 3px; background: #e2e8f0; cursor: pointer; }
