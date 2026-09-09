@@ -970,10 +970,7 @@
                         if (!STATE.courses.some(c => c.lessonAssoc === lessonAssoc)) {
                             STATE.courses.push({lessonAssoc, status: 'pending', isPaused: false});
                             rebuildConflicts();
-                            ExecutionEngine.syncCourseDetails([lessonAssoc])
-                                .catch((error) => {
-                                    console.warn('[抢课助手] 单课程详情同步失败:', error.message || error);
-                                });
+
                         }
                         Persistence.save();
                         ExecutionEngine.refreshMissingCourseDetails();
@@ -996,12 +993,6 @@
                         });
                         console.log(`[抢课助手] 导入 ${importedCount} 门新课程 `);
                         rebuildConflicts();
-                        if (importedCount > 0) {
-                            ExecutionEngine.syncCourseDetails(STATE.courses.map(c => c.lessonAssoc))
-                                .catch((error) => {
-                                    console.warn('[抢课助手] 批量课程详情同步失败:', error.message || error);
-                                });
-                        }
                         STATE.isImporting = false; // 导入一次后自动关闭
                         Persistence.save();
                         ExecutionEngine.refreshMissingCourseDetails();
@@ -1028,14 +1019,13 @@
         isCourseInfoIncomplete(course) {
             return !course.courseName || !Array.isArray(course.teacherNames) || course.teacherNames.length === 0;
         },
-        refreshMissingCourseDetails() {
-            if (STATE.courses.some(c => this.isCourseInfoIncomplete(c))) {
-                this.syncCourseDetails(STATE.courses.map(c => c.lessonAssoc))
-                    .finally(() => {
-                        UI.render();
-                    });
-            } else {
-                UI.render();
+        async refreshMissingCourseDetails() {
+            const ids = STATE.courses.filter(course => this.isCourseInfoIncomplete(course)).map(course => course.lessonAssoc);
+            if (!ids.length) return;
+            try {
+                await this.syncCourseDetails(ids);
+            } catch (error) {
+                console.warn('[抢课助手] 课程详情同步失败:', error.message || error);
             }
         },
         async queryLessonDetails(lessonAssocs) {
