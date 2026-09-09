@@ -1082,7 +1082,6 @@
         },
         async refreshMissingCourseDetails() {
             const ids = STATE.courses.filter(course => this.isCourseInfoIncomplete(course)).map(course => course.lessonAssoc);
-            if (!ids.length) return;
             try {
                 await this.syncCourseDetails(ids);
             } catch (error) {
