@@ -24,7 +24,7 @@
     const STORAGE_KEY = 'fudan_course_grabber_state';
     const FIRST_RUN_NOTICE_KEY = 'first_run_notice_v2';
     const STATE = {
-        courses: [], // 意向课程列表 { lessonAssoc: number, status: 'pending' | 'success', isPaused?: boolean, courseName?: string, teacherNames?: string[], schedule?: object[] }
+        courses: [], // status: 'pending' | 'paused' | 'success' | 'selected'; removeAfterStop is an independent server instruction.
         selectedCourses: [],
         courseConflicts: new Map(), // lessonAssoc -> Array<{ lessonAssoc, lessonNameZh }>
         studentId: '',
@@ -38,7 +38,6 @@
         workers: 0,
         grabStatusIntvId: null,
         syncSelectedCoursesIntvId: null,
-        toBeRemoved: new Set(),
         serverErrorNoticeKey: '',
     };
     const WEEKDAY_LABELS = ['', '周一', '周二', '周三', '周四', '周五', '周六', '周日'];
@@ -215,6 +214,10 @@
         STATE.courseConflicts = buildCourseConflicts(STATE.courses, STATE.selectedCourses);
     }
 
+    function isCourseSuccessful(course) {
+        return course.status === 'success' || course.status === 'selected';
+    }
+
     function getCoursePayload() {
         const seen = new Set();
         const courses = [];
@@ -224,7 +227,7 @@
             seen.add(lessonAssoc);
             courses.push({
                 lessonAssoc,
-                isPaused: Boolean(course.isPaused),
+                isPaused: course.status === 'paused',
             });
         });
         return courses;
@@ -624,10 +627,10 @@
                     if (STATE.courseConflicts.get(Number(course.lessonAssoc))?.length) {
                         li.classList.add('course-conflict');
                     }
-                    if (course.isPaused && STATE.isGrabbing) {
+                    if (course.status === 'paused' && STATE.isGrabbing) {
                         li.classList.add('course-paused');
                     }
-                    li.innerHTML = UI_ASSETS.courseListItem(course, index, STATE.isGrabbing, escapeHtml);
+                    li.innerHTML = UI_ASSETS.courseListItem({...course, status: isCourseSuccessful(course) ? 'success' : 'pending', isPaused: course.status === 'paused'}, index, STATE.isGrabbing, escapeHtml);
                     fragment.appendChild(li);
                 });
                 this.courseListEl.appendChild(fragment);
@@ -753,9 +756,9 @@
                 if (!course) return;
 
                 if (STATE.isGrabbing) {
-                    if (target.dataset.action !== 'toggle-pause' || course.status === 'success') return;
+                    if (target.dataset.action !== 'toggle-pause' || isCourseSuccessful(course)) return;
                     try {
-                        await ExecutionEngine.toggleCoursePause(course.lessonAssoc, !course.isPaused);
+                        await ExecutionEngine.toggleCoursePause(course.lessonAssoc, course.status !== 'paused');
                     } catch (error) {
                         alert(`课程状态切换失败: ${error.message || error}`);
                     }
@@ -876,7 +879,7 @@
                 const lessonAssoc = normalizeLessonAssoc(id);
                 if (lessonAssoc === null || seen.has(lessonAssoc)) continue;
                 seen.add(lessonAssoc);
-                added.push({lessonAssoc, status: 'pending', isPaused: false});
+                added.push({lessonAssoc, status: 'pending', removeAfterStop: false});
             }
             if (added.length) this.replace([...STATE.courses, ...added]);
             return added.length;
@@ -969,11 +972,12 @@
                     const lessonAssoc = normalizeLessonAssoc(course.lessonAssoc);
                     if (lessonAssoc === null || seen.has(lessonAssoc)) return null;
                     seen.add(lessonAssoc);
+                    const {isPaused, selectedConfirmed, ...details} = course;
                     return {
-                        ...course,
+                        ...details,
                         lessonAssoc,
-                        status: 'pending',
-                        isPaused: course.isPaused === true,
+                        status: course.status === 'paused' || course.isPaused === true ? 'paused' : 'pending',
+                        removeAfterStop: false,
                         teacherNames: Array.isArray(course.teacherNames) ? course.teacherNames.filter(name => typeof name === 'string') : [],
                         schedule: Array.isArray(course.schedule) ? course.schedule.filter(item => item && typeof item === 'object') : [],
                         scheduleSummary: Array.isArray(course.scheduleSummary) ? course.scheduleSummary.filter(item => typeof item === 'string') : [],
@@ -1122,9 +1126,8 @@
             }
             const selectedCourses = parsed.data.map(lesson => ({
                 ...normalizeLessonDetails(lesson),
-                status: 'success',
-                isPaused: true,
-                selectedConfirmed: true,
+                status: 'selected',
+                removeAfterStop: true,
             }));
             return selectedCourses;
         },
@@ -1144,11 +1147,11 @@
                 const selectedById = new Map(selectedCourses.map(c => [c.lessonAssoc, c]));
                 const selectedIds = new Set(
                     STATE.courses
-                        .filter(c => c.status !== 'success' && selectedById.has(c.lessonAssoc))
+                        .filter(c => !isCourseSuccessful(c) && selectedById.has(c.lessonAssoc))
                         .map(c => c.lessonAssoc)
                 );
                 const successIds = new Set([
-                    ...STATE.courses.filter(c => c.status === 'success').map(c => c.lessonAssoc),
+                    ...STATE.courses.filter(c => isCourseSuccessful(c)).map(c => c.lessonAssoc),
                     ...selectedIds,
                 ]);
                 const conflictIds = new Set(
@@ -1159,8 +1162,8 @@
                 const confirmedSelectedIds = new Set();
                 for (const course of STATE.courses) {
                     if (
-                        course.status === 'success' ||
-                        (course.isPaused && !selectedIds.has(course.lessonAssoc)) ||
+                        isCourseSuccessful(course) ||
+                        (course.status === 'paused' && !selectedIds.has(course.lessonAssoc)) ||
                         (!selectedIds.has(course.lessonAssoc) && !conflictIds.has(course.lessonAssoc))
                     ) continue;
                     try {
@@ -1174,7 +1177,6 @@
 
                 CourseStore.replace(STATE.courses.map(course => {
                     if (!confirmedSelectedIds.has(course.lessonAssoc)) return course;
-                    STATE.toBeRemoved.add(course.lessonAssoc);
                     return {...course, ...selectedById.get(course.lessonAssoc)};
                 }));
             } finally {
@@ -1199,26 +1201,15 @@
                 const serverCourse = byId.get(course.lessonAssoc);
                 if (!serverCourse) return course;
 
-                if (course.selectedConfirmed) {
-                    STATE.toBeRemoved.add(course.lessonAssoc);
-                    return {...course, status: 'success', isPaused: true};
-                }
-
-                const nextStatus = serverCourse.status === 'success' ? 'success' : 'pending';
-                const nextPaused = serverCourse.status === 'paused';
+                // A website-confirmed selection cannot be downgraded by the local server.
+                if (course.status === 'selected') return course;
                 const nextCourse = {
                     ...course,
-                    status: nextStatus,
-                    isPaused: nextPaused,
+                    status: serverCourse.status === 'success' ? 'success'
+                        : serverCourse.status === 'paused' ? 'paused' : 'pending',
+                    removeAfterStop: Boolean(serverCourse.markedForRemoval),
                 };
-
-                if (serverCourse.markedForRemoval) {
-                    STATE.toBeRemoved.add(course.lessonAssoc);
-                } else {
-                    STATE.toBeRemoved.delete(course.lessonAssoc);
-                }
-
-                if (nextCourse.status !== course.status || nextCourse.isPaused !== course.isPaused) {
+                if (nextCourse.status !== course.status || nextCourse.removeAfterStop !== course.removeAfterStop) {
                     changed = true;
                 }
                 return nextCourse;
@@ -1270,11 +1261,11 @@
             }
 
             STATE.concurrency = normalizeConcurrency(STATE.concurrency);
-            STATE.toBeRemoved.clear();
-            CourseStore.replace(STATE.courses.map(course => {
-                const {selectedConfirmed, ...details} = course;
-                return {...details, status: 'pending'};
-            }));
+            CourseStore.replace(STATE.courses.map(course => ({
+                ...course,
+                status: course.status === 'paused' ? 'paused' : 'pending',
+                removeAfterStop: false,
+            })));
             await this.syncCourseDetails(STATE.courses.map(c => c.lessonAssoc)).catch(error => {
                 console.warn('[抢课助手] 抢课前详情同步失败，继续使用已有信息:', error.message || error);
             });
@@ -1310,13 +1301,12 @@
             const removedCourses = uniqueNonEmpty(
                 ((stopResult?.removedCourses || []).map(id => normalizeLessonAssoc(id)).filter(id => id !== null))
             ).map(Number);
-            const removedSet = new Set([...STATE.toBeRemoved, ...removedCourses]);
-            STATE.toBeRemoved.clear();
+            const removedSet = new Set([...STATE.courses.filter(course => course.removeAfterStop).map(course => course.lessonAssoc), ...removedCourses]);
             this.stopPolling();
             CourseStore.replace(STATE.courses.filter(course => !removedSet.has(course.lessonAssoc)).map(course => ({
                 ...course,
-                isPaused: false,
-                status: course.status === 'success' ? 'success' : 'pending',
+                status: isCourseSuccessful(course) ? course.status : 'pending',
+                removeAfterStop: false,
             })));
         },
         async pollGrabStatus() {
