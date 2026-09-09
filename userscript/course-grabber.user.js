@@ -956,76 +956,88 @@
         }
     };
 
-    // --- XHR 拦截 ---
+    // --- Captured request actions ---
+    const CapturedRequests = {
+        manualSelect(payload, headers) {
+            const lessonAssoc = normalizeLessonAssoc(payload?.requestMiddleDtos?.[0]?.lessonAssoc);
+            if (lessonAssoc === null) return;
+            SessionStore.capture(payload.studentAssoc, payload.courseSelectTurnAssoc, headers);
+            if (!STATE.courses.some(course => course.lessonAssoc === lessonAssoc)) {
+                STATE.courses.push({lessonAssoc, status: 'pending', isPaused: false});
+                rebuildConflicts();
+            }
+            Persistence.save();
+            ExecutionEngine.refreshMissingCourseDetails();
+            UI.render();
+        },
+        importLessons(ids) {
+            if (!STATE.isImporting) return;
+            let importedCount = 0;
+            ids.forEach(id => {
+                const lessonAssoc = normalizeLessonAssoc(id);
+                if (lessonAssoc !== null && !STATE.courses.some(course => course.lessonAssoc === lessonAssoc)) {
+                    STATE.courses.push({lessonAssoc, status: 'pending', isPaused: false});
+                    importedCount++;
+                }
+            });
+            console.log(`[抢课助手] 导入 ${importedCount} 门新课程`);
+            STATE.isImporting = false;
+            rebuildConflicts();
+            Persistence.save();
+            ExecutionEngine.refreshMissingCourseDetails();
+            UI.render();
+        },
+    };
+
+    // --- XHR observation: bookkeeping stays off the page's XHR instances. ---
     const XHRInterceptor = {
+        uninstall: null,
         init() {
-            const originalSend = XMLHttpRequest.prototype.send;
-            XMLHttpRequest.prototype.send = function (body) {
-                let url;
-                try {
-                    url = new URL(this._url, window.location.origin);
-                } catch (_error) {
-                    return originalSend.apply(this, arguments);
-                }
-
-                // 捕获手动选课操作
-                if (url.pathname.includes('/api/v1/student/course-select/add-predicate')) {
-                    try {
-                        const payload = JSON.parse(body);
-                        const lessonAssoc = normalizeLessonAssoc(payload?.requestMiddleDtos?.[0]?.lessonAssoc);
-                        const studentAssoc = payload.studentAssoc;
-                        const turnId = payload.courseSelectTurnAssoc;
-                        if (lessonAssoc === null) {
-                            return originalSend.apply(this, arguments);
-                        }
-                        console.log(`[抢课助手] 捕获到 Lesson ${lessonAssoc}`);
-                        SessionStore.capture(studentAssoc, turnId, this._headers);
-                        if (!STATE.courses.some(c => c.lessonAssoc === lessonAssoc)) {
-                            STATE.courses.push({lessonAssoc, status: 'pending', isPaused: false});
-                            rebuildConflicts();
-
-                        }
-                        Persistence.save();
-                        ExecutionEngine.refreshMissingCourseDetails();
-                        UI.render();
-                    } catch (e) {
-                        console.error('[抢课助手] 解析请求 payload 失败:', e);
+            if (this.uninstall) return;
+            const prototype = XMLHttpRequest.prototype;
+            const originals = {open: prototype.open, send: prototype.send, setRequestHeader: prototype.setRequestHeader};
+            const requests = new WeakMap();
+            const wrappers = {
+                open(method, url) {
+                    const result = originals.open.apply(this, arguments);
+                    requests.set(this, {url, headers: {}});
+                    return result;
+                },
+                setRequestHeader(name, value) {
+                    const result = originals.setRequestHeader.apply(this, arguments);
+                    const request = requests.get(this);
+                    if (request) {
+                        const key = String(name).toLowerCase();
+                        request.headers[key] = key in request.headers ? `${request.headers[key]}, ${value}` : String(value);
                     }
-                }
-                // 捕获页面课程列表加载操作（仅在导入模式下）
-                else if (STATE.isImporting && url.pathname.includes('/api/v1/student/course-select/std-count')) {
-                    const lessonIdsParam = url.searchParams.get('lessonIds');
-                    if (lessonIdsParam) {
-                        let importedCount = 0;
-                        lessonIdsParam.split(',').forEach(idStr => {
-                            const lessonAssoc = normalizeLessonAssoc(idStr);
-                            if (lessonAssoc !== null && !STATE.courses.some(c => c.lessonAssoc === lessonAssoc)) {
-                                STATE.courses.push({lessonAssoc, status: 'pending', isPaused: false});
-                                importedCount++;
+                    return result;
+                },
+                send(body) {
+                    const request = requests.get(this);
+                    if (request) {
+                        try {
+                            const url = new URL(request.url, window.location.origin);
+                            if (url.pathname.includes('/api/v1/student/course-select/add-predicate')) {
+                                CapturedRequests.manualSelect(JSON.parse(body), request.headers);
+                            } else if (url.pathname.includes('/api/v1/student/course-select/std-count')) {
+                                const ids = url.searchParams.get('lessonIds');
+                                if (ids) CapturedRequests.importLessons(ids.split(','));
                             }
-                        });
-                        console.log(`[抢课助手] 导入 ${importedCount} 门新课程 `);
-                        rebuildConflicts();
-                        STATE.isImporting = false; // 导入一次后自动关闭
-                        Persistence.save();
-                        ExecutionEngine.refreshMissingCourseDetails();
-                        UI.render();
+                        } catch (error) {
+                            console.warn('[抢课助手] 无法处理捕获的请求:', error.message || error);
+                        }
                     }
+                    return originals.send.apply(this, arguments);
+                },
+            };
+            Object.assign(prototype, wrappers);
+            this.uninstall = () => {
+                for (const name of Object.keys(originals)) {
+                    if (prototype[name] === wrappers[name]) prototype[name] = originals[name];
                 }
-                return originalSend.apply(this, arguments);
+                this.uninstall = null;
             };
-            const originalOpen = XMLHttpRequest.prototype.open;
-            XMLHttpRequest.prototype.open = function (method, url) {
-                this._url = url;
-                this._headers = {};
-                return originalOpen.apply(this, arguments);
-            };
-            const originalSetRequestHeader = XMLHttpRequest.prototype.setRequestHeader;
-            XMLHttpRequest.prototype.setRequestHeader = function (header, value) {
-                this._headers[header] = value;
-                return originalSetRequestHeader.apply(this, arguments);
-            };
-        }
+        },
     };
     // --- 抢课执行引擎 ---
     const ExecutionEngine = {
