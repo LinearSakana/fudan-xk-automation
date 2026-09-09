@@ -1023,10 +1023,7 @@
             const queryUrl = `/api/v1/student/course-select/query-lesson/${STATE.studentId}/${STATE.turnId}`;
             const parsed = await requestApi(queryUrl, 'POST', payload, {
                 baseUrl: '',
-                headers: {
-                    ...STATE.headers,
-                    'Content-Type': 'application/json;charset=UTF-8',
-                },
+                headers: {...STATE.headers},
             });
             const lessons = parsed?.data?.lessons;
             if (parsed.result !== 0 || !Array.isArray(lessons)) return [];
