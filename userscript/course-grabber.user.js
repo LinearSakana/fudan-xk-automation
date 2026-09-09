@@ -36,8 +36,6 @@
         concurrency: 2, // 每门课并发实例数量
         rps: 0,
         workers: 0,
-        grabStatusIntvId: null,
-        syncSelectedCoursesIntvId: null,
         serverErrorNoticeKey: '',
     };
     const WEEKDAY_LABELS = ['', '周一', '周二', '周三', '周四', '周五', '周六', '周日'];
@@ -638,7 +636,7 @@
             }
 
             // --- 按钮状态缓存 ---
-            const currentButtonsState = `${STATE.isGrabbing}|${STATE.isImporting}`;
+            const currentButtonsState = `${STATE.isGrabbing}|${STATE.isImporting}|${ExecutionEngine.isCommandPending}`;
             if (this.lastButtonsState !== currentButtonsState) {
                 this.lastButtonsState = currentButtonsState;
                 const grabBtn = document.getElementById('grab-btn');
@@ -658,6 +656,10 @@
                     importBtn.disabled = STATE.isImporting;
                     resetBtn.disabled = false;
                     clearBtn.disabled = false;
+                }
+                grabBtn.disabled = ExecutionEngine.isCommandPending;
+                if (ExecutionEngine.isCommandPending) {
+                    importBtn.disabled = resetBtn.disabled = clearBtn.disabled = true;
                 }
                 importBtn.textContent = STATE.isImporting ? '正在导入...' : '导入页面';
             }
@@ -758,7 +760,7 @@
                 if (STATE.isGrabbing) {
                     if (target.dataset.action !== 'toggle-pause' || isCourseSuccessful(course)) return;
                     try {
-                        await ExecutionEngine.toggleCoursePause(course.lessonAssoc, course.status !== 'paused');
+                        await ExecutionEngine.runCommand(() => ExecutionEngine.toggleCoursePause(course.lessonAssoc, course.status !== 'paused'));
                     } catch (error) {
                         alert(`课程状态切换失败: ${error.message || error}`);
                     }
@@ -816,9 +818,9 @@
             grabBtn.addEventListener('click', async () => {
                 try {
                     if (STATE.isGrabbing) {
-                        await ExecutionEngine.stop();
+                        await ExecutionEngine.runCommand(() => ExecutionEngine.stop());
                     } else {
-                        await ExecutionEngine.start();
+                        await ExecutionEngine.runCommand(() => ExecutionEngine.start());
                     }
                 } catch (error) {
                     alert(`请求本地服务失败: ${error.message || error}`);
@@ -1068,6 +1070,21 @@
     };
     // --- 抢课执行引擎 ---
     const ExecutionEngine = {
+        pollGeneration: 0,
+        pollTimers: new Set(),
+        serverStatusRevision: 0,
+        isCommandPending: false,
+        async runCommand(command) {
+            if (this.isCommandPending) return;
+            this.isCommandPending = true;
+            UI.render();
+            try {
+                return await command();
+            } finally {
+                this.isCommandPending = false;
+                UI.render();
+            }
+        },
         isCourseInfoIncomplete(course) {
             return !course.courseName || !Array.isArray(course.teacherNames) || course.teacherNames.length === 0;
         },
@@ -1138,12 +1155,14 @@
             CourseStore.setSelected(selectedCourses);
             return selectedCourses;
         },
-        async syncSelectedCourses() {
+        async syncSelectedCourses(generation = this.pollGeneration) {
             if (!STATE.isGrabbing || this.isSelectedCoursesSyncing) return;
             this.isSelectedCoursesSyncing = true;
+            const headers = STATE.headers;
+            const isCurrent = () => generation === this.pollGeneration && STATE.isGrabbing && STATE.headers === headers;
             try {
                 const selectedCourses = await this.refreshSelectedCourses();
-                UI.render();
+                if (!isCurrent()) return;
                 const selectedById = new Map(selectedCourses.map(c => [c.lessonAssoc, c]));
                 const selectedIds = new Set(
                     STATE.courses
@@ -1167,7 +1186,11 @@
                         (!selectedIds.has(course.lessonAssoc) && !conflictIds.has(course.lessonAssoc))
                     ) continue;
                     try {
+                        if (!isCurrent()) return;
+                        this.serverStatusRevision++;
                         const status = await requestApi('/course/pause', 'POST', {lessonAssoc: course.lessonAssoc});
+                        this.serverStatusRevision++;
+                        if (!isCurrent()) return;
                         this.syncCoursesFromServer(status?.courses);
                         if (selectedIds.has(course.lessonAssoc)) confirmedSelectedIds.add(course.lessonAssoc);
                     } catch (error) {
@@ -1175,6 +1198,7 @@
                     }
                 }
 
+                if (!isCurrent()) return;
                 CourseStore.replace(STATE.courses.map(course => {
                     if (!confirmedSelectedIds.has(course.lessonAssoc)) return course;
                     return {...course, ...selectedById.get(course.lessonAssoc)};
@@ -1243,14 +1267,19 @@
             }
             if (!STATE.isGrabbing) return;
 
+            const generation = this.pollGeneration;
+            this.serverStatusRevision++;
             const path = pause ? '/course/pause' : '/course/resume';
             const status = await requestApi(path, 'POST', {lessonAssoc: normalizeLessonAssoc(lessonAssoc)});
+            this.serverStatusRevision++;
+            if (generation !== this.pollGeneration || !STATE.isGrabbing) return;
             this.syncCoursesFromServer(status?.courses);
             STATE.rps = Number(status?.rps || 0);
             STATE.workers = Number(status?.workers || 0);
             UI.render();
         },
         async start() {
+            this.serverStatusRevision++;
             if (!STATE.studentId || !STATE.turnId || Object.keys(STATE.headers).length === 0) {
                 alert('上下文信息不完整，请先在网页上进行一次手动选课操作以自动捕获');
                 return;
@@ -1294,7 +1323,14 @@
             UI.render();
         },
         async stop() {
-            const stopResult = await requestApi('/stop', 'POST', {});
+            this.stopPolling();
+            let stopResult;
+            try {
+                stopResult = await requestApi('/stop', 'POST', {});
+            } catch (error) {
+                if (STATE.isGrabbing) this.startPolling();
+                throw error;
+            }
             STATE.isGrabbing = false;
             STATE.rps = 0;
             STATE.workers = 0;
@@ -1309,8 +1345,10 @@
                 removeAfterStop: false,
             })));
         },
-        async pollGrabStatus() {
-            let status = await requestApi('/status', 'GET');
+        async pollGrabStatus(generation = this.pollGeneration) {
+            const revision = this.serverStatusRevision;
+            const status = await requestApi('/status', 'GET');
+            if (generation !== this.pollGeneration || revision !== this.serverStatusRevision) return;
             this.syncCoursesFromServer(status?.courses);
             if (this.handleServerError(status)) {
                 UI.render();
@@ -1326,32 +1364,30 @@
         },
         startPolling() {
             this.stopPolling();
-            this.pollGrabStatus().catch(error => {
-                console.error('[抢课助手] 获取服务端状态失败:', error.message || error);
-            });
-            this.syncSelectedCourses().catch(error => {
-                console.warn('[抢课助手] 已选课程同步失败:', error.message || error);
-            });
-            STATE.grabStatusIntvId = setInterval(() => {
-                this.pollGrabStatus().catch(error => {
-                    console.error('[抢课助手] 获取服务端状态失败:', error.message || error);
-                });
-            }, 1000);
-            STATE.syncSelectedCoursesIntvId = setInterval(() => {
-                this.syncSelectedCourses().catch(error => {
-                    console.warn('[抢课助手] 已选课程同步失败:', error.message || error);
-                });
-            }, 5000);
+            const generation = this.pollGeneration;
+            const poll = async (method, delay, label) => {
+                try {
+                    await this[method](generation);
+                } catch (error) {
+                    if (generation === this.pollGeneration) console.warn(`[抢课助手] ${label}:`, error.message || error);
+                } finally {
+                    if (generation === this.pollGeneration && STATE.isGrabbing) {
+                        const timer = setTimeout(() => {
+                            this.pollTimers.delete(timer);
+                            poll(method, delay, label);
+                        }, delay);
+                        this.pollTimers.add(timer);
+                    }
+                }
+            };
+            poll('pollGrabStatus', 1000, '获取服务端状态失败');
+            poll('syncSelectedCourses', 5000, '已选课程同步失败');
         },
         stopPolling() {
-            if (STATE.grabStatusIntvId) {
-                clearInterval(STATE.grabStatusIntvId);
-                STATE.grabStatusIntvId = null;
-            }
-            if (STATE.syncSelectedCoursesIntvId) {
-                clearInterval(STATE.syncSelectedCoursesIntvId);
-                STATE.syncSelectedCoursesIntvId = null;
-            }
+            this.pollGeneration++;
+            this.serverStatusRevision++;
+            this.pollTimers.forEach(timer => clearTimeout(timer));
+            this.pollTimers.clear();
         },
     };
 
@@ -1377,7 +1413,9 @@
                     .catch(err => console.warn('[抢课助手] 初始化课表同步失败:', err.message || err));
             }
             showFirstRunNotice();
+            const revision = ExecutionEngine.serverStatusRevision;
             requestApi('/status', 'GET').then((status) => {
+                if (revision !== ExecutionEngine.serverStatusRevision) return;
                 STATE.isGrabbing = Boolean(status?.running);
                 STATE.rps = Number(status?.rps || 0);
                 STATE.workers = Number(status?.workers || 0);
