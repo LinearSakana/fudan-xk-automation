@@ -545,6 +545,13 @@
         hoverCourseIndex: -1,
         lastRenderState: null,
         lastButtonsState: null,
+        updateConcurrencyTooltip() {
+            const slider = document.getElementById('concurrency-slider');
+            if (!slider) return;
+            const progress = (Number(slider.value) - Number(slider.min)) / (Number(slider.max) - Number(slider.min));
+            slider.parentElement.style.setProperty('--range-progress', progress);
+            document.getElementById('concurrency-value').textContent = slider.value;
+        },
         createPanel() {
             if (document.getElementById('grabber-panel')) return;
             const panel = document.createElement('div');
@@ -557,20 +564,16 @@
                     <span id="header-student-id" class="header-student-id" title="StudentID" style="display: none;"></span>
                 </div>
                 <div class="grabber-body">
-                    <div class="grabber-controls">
-                        <label class="checkbox-label" title="跳过滑动验证码（按需设置）">
-                            <input type="checkbox" id="skip-captcha-checkbox">
-                            <span class="checkmark"></span>
-                            跳过验证
-                        </label>
-                    <div class="rps-display" title="本地服务状态" aria-label="本地服务状态">
-                            RPS: <span id="rps-value">0</span> | Workers: <span id="workers-value">0</span>
-                        </div>
-                    </div>
                     <div class="grabber-slider-group">
                         <label for="concurrency-slider" id="concurrency-num">并发数</label>
-                        <input type="range" id="concurrency-slider" min="1" max="10" value="2">
-                        <span id="concurrency-value" class="badge">2</span>
+                        <div class="concurrency-range">
+                            <input type="range" id="concurrency-slider" min="1" max="10" value="2">
+                            <span id="concurrency-value" class="concurrency-tooltip" aria-hidden="true">2</span>
+                        </div>
+                        <div class="rps-display" title="本地服务状态">
+                            <span class="grabber-metric">Req/s <span id="rps-value">0</span></span>
+                            <span class="grabber-metric">Workers <span id="workers-value">0</span></span>
+                        </div>
                     </div>
                     <ul id="course-list" aria-label="意向课程"></ul>
                     <div class="grabber-sub-actions">
@@ -580,6 +583,13 @@
                     </div>
                     <div class="grabber-actions">
                         <button id="grab-btn" class="btn-start">开始抢课</button>
+                    </div>
+                    <div class="grabber-controls">
+                        <label class="checkbox-label" title="跳过滑动验证码（按需设置）">
+                            <input type="checkbox" id="skip-captcha-checkbox">
+                            <span class="checkmark"></span>
+                            跳过验证
+                        </label>
                     </div>
                 </div>
             `;
@@ -654,19 +664,36 @@
                 .grabber-title { font-weight: 400; font-size: 14px; letter-spacing: 0.5px; }
                 .header-student-id { font-size: 12px; opacity: 0.9; background: rgba(255,255,255,0.2); padding: 2px 8px; border-radius: 12px; font-variant-numeric: tabular-nums; }
                 .grabber-body { padding: 14px; display: flex; flex-direction: column; gap: 10px; }
-                .grabber-controls { display: flex; justify-content: space-between; align-items: center; }
-                .checkbox-label { display: flex; align-items: center; gap: 6px; cursor: pointer; font-size: 13px; color: #4a5568; user-select: none; }
+                .grabber-controls { display: flex; flex-wrap: wrap; justify-content: flex-start; align-items: center; gap: 6px 12px; margin-top: -4px; }
+                .checkbox-label { display: flex; align-items: center; gap: 6px; cursor: pointer; font-size: 12px; color: #4a5568; user-select: none; }
                 .checkbox-label input { position: absolute; width: 1px; height: 1px; opacity: 0; }
                 .checkbox-label input:focus-visible + .checkmark { outline: 2px solid #3182ce; outline-offset: 2px; }
-                .checkmark { width: 16px; height: 16px; border: 2px solid #cbd5e0; border-radius: 4px; display: inline-block; position: relative; transition: all 0.2s; }
+                .checkmark { width: 14px; height: 14px; border: 2px solid #cbd5e0; border-radius: 4px; display: inline-block; position: relative; top: 1px; transition: all 0.2s; }
                 .checkbox-label input:checked + .checkmark { background: #3182ce; border-color: #3182ce; }
                 .checkbox-label input:checked + .checkmark::after { content: ''; position: absolute; left: 4px; top: 1px; width: 4px; height: 8px; border: solid white; border-width: 0 2px 2px 0; transform: rotate(45deg); }
-                .rps-display { font-size: 13px; color: #4a5568; background: #edf2f7; padding: 4px 10px; border-radius: 12px; font-weight: 500; }
-                #rps-value { color: #2b6cb0; font-variant-numeric: tabular-nums; }
-                .grabber-slider-group { display: flex; align-items: center; gap: 10px; padding: 6px 8px }
-                #concurrency-num { font-size: 13px; color: #4a5568; white-space: nowrap; }
-                #concurrency-slider { flex-grow: 1; accent-color: #3182ce; height: 6px; border-radius: 2px; }
-                .badge { background: #e2e8f0; color: #2d3748; padding: 2px 8px; border-radius: 10px; font-size: 12px; font-weight: 600; min-width: 24px; text-align: center; }
+                .rps-display { display: grid; box-sizing: border-box; flex: 0 0 82px; min-width: 0; overflow: hidden; padding: 3px 7px; border: 1px solid #e2e8f0; border-radius: 9px; background: linear-gradient(135deg, #f7fafc, #edf2f7); color: #718096; font-size: 11px; line-height: 16px; }
+                .grabber-metric { grid-area: 1 / 1; display: flex; align-items: center; justify-content: space-between; gap: 6px; white-space: nowrap; animation: grabber-metric-cycle 6s ease-in-out infinite; }
+                .grabber-metric:nth-child(2) { animation-delay: -3s; }
+                #rps-value, #workers-value { min-width: 0; overflow: hidden; text-overflow: ellipsis; color: #2b6cb0; font-weight: 600; font-variant-numeric: tabular-nums; }
+                @keyframes grabber-metric-cycle {
+                    0%, 42%, 100% { opacity: 1; transform: translateY(0); }
+                    50% { opacity: 0; transform: translateY(-12px); }
+                    50.01%, 92% { opacity: 0; transform: translateY(12px); }
+                }
+                @media (prefers-reduced-motion: reduce) {
+                    .grabber-metric { grid-area: auto; animation: none; }
+                }
+                .grabber-slider-group { display: flex; align-items: center; gap: 8px; padding: 0 0 6px; }
+                #concurrency-num { flex-shrink: 0; font-size: 12px; color: #4a5568; white-space: nowrap; }
+                .concurrency-range { position: relative; flex: 1; min-width: 0; display: flex; align-items: center; height: 22px; --thumb-size: 14px; }
+                #concurrency-slider { appearance: none; width: 100%; margin: 0; height: 6px; border-radius: 3px; background: #e2e8f0; cursor: pointer; }
+                #concurrency-slider::-webkit-slider-thumb { appearance: none; width: var(--thumb-size); height: var(--thumb-size); border: 2px solid white; border-radius: 50%; background: #3182ce; box-shadow: 0 1px 4px rgba(43,108,176,.3); }
+                #concurrency-slider::-moz-range-thumb { box-sizing: border-box; width: var(--thumb-size); height: var(--thumb-size); border: 2px solid white; border-radius: 50%; background: #3182ce; box-shadow: 0 1px 4px rgba(43,108,176,.3); }
+                #concurrency-slider:focus-visible { outline: 2px solid #3182ce; outline-offset: 4px; }
+                .concurrency-tooltip { position: absolute; bottom: calc(100% + 4px); left: calc(var(--range-progress, 0) * (100% - var(--thumb-size)) + var(--thumb-size) / 2); padding: 3px 7px; border-radius: 7px; background: linear-gradient(135deg, #2b6cb0, #3182ce); color: white; font-size: 11px; font-weight: 600; line-height: 16px; font-variant-numeric: tabular-nums; box-shadow: 0 3px 8px rgba(43,108,176,.2); pointer-events: none; opacity: 0; transform: translate(-50%, 4px) scale(.92); transition: opacity .16s ease, transform .16s ease; }
+                .concurrency-tooltip::after { content: ''; position: absolute; top: 100%; left: 50%; margin-left: -3px; border: 3px solid transparent; border-top-color: #3182ce; }
+                .concurrency-range:hover .concurrency-tooltip, #concurrency-slider:focus-visible + .concurrency-tooltip, #concurrency-slider:active + .concurrency-tooltip { opacity: 1; transform: translate(-50%, 0) scale(1); }
+                @media (prefers-reduced-motion: reduce) { .concurrency-tooltip { transition: none; } }
                 #course-list { list-style: none; padding: 0; margin: 0; max-height: 380px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; scrollbar-width: thin; scrollbar-color: #cbd5e0 transparent; }
                 #course-list::-webkit-scrollbar { width: 6px; }
                 #course-list::-webkit-scrollbar-thumb { background-color: #cbd5e0; border-radius: 10px; }
@@ -850,10 +877,7 @@
                 concurrencySlider.value = STATE.concurrency.toString();
             }
 
-            const concurrencyValue = document.getElementById('concurrency-value');
-            if (concurrencyValue && concurrencyValue.textContent !== STATE.concurrency.toString()) {
-                concurrencyValue.textContent = STATE.concurrency.toString();
-            }
+            this.updateConcurrencyTooltip();
 
             const rpsText = STATE.rps.toString();
             const rpsEl = document.getElementById('rps-value');
@@ -1117,7 +1141,7 @@
             });
             document.getElementById('concurrency-slider').addEventListener('input', (e) => {
                 STATE.concurrency = parseInt(e.target.value, 10);
-                document.getElementById('concurrency-value').textContent = STATE.concurrency;
+                this.updateConcurrencyTooltip();
                 Persistence.save();
             });
             document.getElementById('clear-btn').addEventListener('click', () => {
