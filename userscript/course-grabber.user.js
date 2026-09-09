@@ -8,7 +8,7 @@
 // @icon         https://id.fudan.edu.cn/ac/favicon.ico
 // @grant        none
 // @run-at       document-start
-// @require      https://cdn.jsdelivr.net/gh/LinearSakana/fudan-xk-automation@main/userscript/course-grabber-ui.js?v=0.2
+// @require      https://cdn.jsdelivr.net/gh/LinearSakana/fudan-xk-automation@main/userscript/course-grabber-ui.js?v=0.3
 // @updateURL    https://cdn.jsdelivr.net/gh/LinearSakana/fudan-xk-automation@main/userscript/course-grabber.user.js
 // @downloadURL  https://cdn.jsdelivr.net/gh/LinearSakana/fudan-xk-automation@main/userscript/course-grabber.user.js
 // ==/UserScript==
@@ -22,7 +22,7 @@
     // --- 全局配置 ---
     const SERVER_BASE_URL = 'http://127.0.0.1:30522';
     const STORAGE_KEY = 'fudan_course_grabber_state';
-    const FIRST_RUN_NOTICE_KEY = 'first_run_notice_v2';
+    const FIRST_RUN_NOTICE_KEY = 'first_run_notice_v3';
     const STATE = {
         courses: [], // 课程可处于如下状态： 'pending' | 'paused' | 'success' | 'selected'
         selectedCourses: [],
