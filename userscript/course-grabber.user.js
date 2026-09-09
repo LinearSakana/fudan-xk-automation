@@ -225,7 +225,7 @@
             seen.add(lessonAssoc);
             courses.push({
                 lessonAssoc,
-                isPaused: course.status === 'paused',
+                isPaused: course.status === 'paused' || course.status === 'selected',
             });
         });
         return courses;
@@ -970,7 +970,7 @@
                     return {
                         ...details,
                         lessonAssoc,
-                        status: course.status === 'paused' || course.isPaused === true ? 'paused' : 'pending',
+                        status: course.status === 'paused' || course.status === 'selected' || course.isPaused === true ? 'paused' : 'pending',
                         removeAfterStop: false,
                         teacherNames: Array.isArray(course.teacherNames) ? course.teacherNames.filter(name => typeof name === 'string') : [],
                         schedule: Array.isArray(course.schedule) ? course.schedule.filter(item => item && typeof item === 'object') : [],
@@ -1283,7 +1283,7 @@
             STATE.concurrency = normalizeConcurrency(STATE.concurrency);
             CourseStore.replace(STATE.courses.map(course => ({
                 ...course,
-                status: course.status === 'paused' ? 'paused' : 'pending',
+                status: course.status === 'paused' || course.status === 'selected' ? 'paused' : 'pending',
                 removeAfterStop: false,
             })));
             await this.syncCourseDetails(STATE.courses.map(c => c.lessonAssoc)).catch(error => {
