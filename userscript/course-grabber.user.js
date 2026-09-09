@@ -249,7 +249,8 @@
         try {
             parsed = await response.json();
         } catch (cause) {
-            const error = new Error(`API 返回了无效 JSON - ${method} ${url} - HTTP ${response.status}`, {cause});
+            const error = new Error(`API 返回了无效 JSON - ${method} ${url} - HTTP ${response.status}`);
+            error.cause = cause;
             error.name = 'ProtocolError';
             error.status = response.status;
             throw error;
@@ -476,7 +477,7 @@
             const slider = this.elements['concurrency-slider'];
             if (!slider) return;
             const progress = (Number(slider.value) - Number(slider.min)) / (Number(slider.max) - Number(slider.min));
-            slider.parentElement.style.setProperty('--range-progress', progress);
+            slider.parentElement.style.setProperty('--range-progress', String(progress));
             this.elements['concurrency-value'].textContent = slider.value;
         },
         createPanel() {
@@ -961,7 +962,7 @@
                     throw new Error('保存的状态格式无效或版本不受支持');
                 }
                 const seen = new Set();
-                const courses = parsed.courses.filter(course => course && typeof course === 'object').map(course => {
+                STATE.courses = parsed.courses.filter(course => course && typeof course === 'object').map(course => {
                     const lessonAssoc = normalizeLessonAssoc(course.lessonAssoc);
                     if (lessonAssoc === null || seen.has(lessonAssoc)) return null;
                     seen.add(lessonAssoc);
@@ -976,7 +977,6 @@
                         scheduleSummary: Array.isArray(course.scheduleSummary) ? course.scheduleSummary.filter(item => typeof item === 'string') : [],
                     };
                 }).filter(Boolean);
-                STATE.courses = courses;
                 STATE.studentId = String(parsed.studentId ?? '');
                 STATE.turnId = String(parsed.turnId ?? '');
                 STATE.headers = parsed.headers && typeof parsed.headers === 'object' && !Array.isArray(parsed.headers)
@@ -1131,12 +1131,11 @@
             if (parsed?.result !== 0 || !Array.isArray(parsed?.data)) {
                 throw new Error(parsed?.message || '已选课程响应格式无效');
             }
-            const selectedCourses = parsed.data.map(lesson => ({
+            return parsed.data.map(lesson => ({
                 ...normalizeLessonDetails(lesson),
                 status: 'selected',
                 removeAfterStop: true,
             }));
-            return selectedCourses;
         },
         async refreshSelectedCourses() {
             const headers = STATE.headers;
