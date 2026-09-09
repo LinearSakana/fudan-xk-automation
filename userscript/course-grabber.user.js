@@ -310,7 +310,7 @@
             if (!this.panel) this.create();
             if (!this.panel.hidden) return;
             this.panel.hidden = false;
-            document.getElementById('timetable-btn').setAttribute('aria-expanded', 'true');
+            UI.elements['timetable-btn'].setAttribute('aria-expanded', 'true');
             this.panel.querySelector('[data-action="close"]').focus();
             await this.refresh();
         },
@@ -328,8 +328,8 @@
             const close = () => {
                 panel.hidden = true;
                 UI.hideHoverCard();
-                document.getElementById('timetable-btn').setAttribute('aria-expanded', 'false');
-                document.getElementById('timetable-btn').focus();
+                UI.elements['timetable-btn'].setAttribute('aria-expanded', 'false');
+                UI.elements['timetable-btn'].focus();
             };
             panel.querySelector('[data-action="close"]').addEventListener('click', close);
             panel.addEventListener('keydown', event => {
@@ -464,17 +464,18 @@
     // --- UI 模块 ---
     const UI = {
         panel: null,
+        elements: {},
         courseListEl: null,
         hoverCardEl: null,
         hoverTriggerEl: null,
         hoverCourseIndex: -1,
         lastCourseMarkup: null,
         updateConcurrencyTooltip() {
-            const slider = document.getElementById('concurrency-slider');
+            const slider = this.elements['concurrency-slider'];
             if (!slider) return;
             const progress = (Number(slider.value) - Number(slider.min)) / (Number(slider.max) - Number(slider.min));
             slider.parentElement.style.setProperty('--range-progress', progress);
-            document.getElementById('concurrency-value').textContent = slider.value;
+            this.elements['concurrency-value'].textContent = slider.value;
         },
         createPanel() {
             if (document.getElementById('grabber-panel')) return;
@@ -485,7 +486,8 @@
             panel.innerHTML = UI_ASSETS.panel;
             document.body.appendChild(panel);
             this.panel = panel;
-            this.courseListEl = document.getElementById('course-list');
+            this.elements = Object.fromEntries(Array.from(panel.querySelectorAll('[id]'), element => [element.id, element]));
+            this.courseListEl = this.elements['course-list'];
             this.ensureHoverCard();
             this.applyStyles();
             this.makeDraggable(panel, panel.querySelector('.grabber-header'));
@@ -575,7 +577,7 @@
             this.renderControls();
         },
         renderSession() {
-            const studentIdEl = document.getElementById('header-student-id');
+            const studentIdEl = this.elements['header-student-id'];
             const studentIdText = STATE.studentId ? STATE.studentId : '未捕获';
             if (studentIdEl) {
                 if (STATE.courses.some(course => ExecutionEngine.isCourseInfoIncomplete(course))) {
@@ -585,16 +587,16 @@
                 }
                 studentIdEl.style.display = STATE.studentId ? 'inline-block' : 'none';
             }
-            const resetBtn = document.getElementById('reset-btn');
+            const resetBtn = this.elements['reset-btn'];
             if (resetBtn) {
                 resetBtn.classList.toggle('important-hint', STATE.courses.some(course => ExecutionEngine.isCourseInfoIncomplete(course)));
             }
-            const skipCaptchaEl = document.getElementById('skip-captcha-checkbox');
+            const skipCaptchaEl = this.elements['skip-captcha-checkbox'];
             if (skipCaptchaEl && skipCaptchaEl.checked !== STATE.skipCaptcha) {
                 skipCaptchaEl.checked = STATE.skipCaptcha;
             }
 
-            const concurrencySlider = document.getElementById('concurrency-slider');
+            const concurrencySlider = this.elements['concurrency-slider'];
             if (concurrencySlider && concurrencySlider.value !== STATE.concurrency.toString()) {
                 concurrencySlider.value = STATE.concurrency.toString();
             }
@@ -604,11 +606,11 @@
         },
         renderMetrics() {
             const rpsText = STATE.rps.toString();
-            const rpsEl = document.getElementById('rps-value');
+            const rpsEl = this.elements['rps-value'];
             if (rpsEl && rpsEl.textContent !== rpsText) {
                 rpsEl.textContent = rpsText;
             }
-            const workersEl = document.getElementById('workers-value');
+            const workersEl = this.elements['workers-value'];
             const workersText = STATE.workers.toString();
             if (workersEl && workersEl.textContent !== workersText) {
                 workersEl.textContent = workersText;
@@ -634,10 +636,10 @@
 
         },
         renderControls() {
-            const resetBtn = document.getElementById('reset-btn');
-            const grabBtn = document.getElementById('grab-btn');
-            const importBtn = document.getElementById('import-btn');
-            const clearBtn = document.getElementById('clear-btn');
+            const resetBtn = this.elements['reset-btn'];
+            const grabBtn = this.elements['grab-btn'];
+            const importBtn = this.elements['import-btn'];
+            const clearBtn = this.elements['clear-btn'];
 
             if (STATE.isGrabbing) {
                 grabBtn.textContent = '停止抢课';
@@ -659,7 +661,7 @@
             importBtn.textContent = STATE.isImporting ? '正在导入...' : '导入页面';
         },
         addEventListeners() {
-            document.getElementById('timetable-btn').addEventListener('click', () => Timetable.open());
+            this.elements['timetable-btn'].addEventListener('click', () => Timetable.open());
 
             let draggingIndex = null;
             const clearDragIndicators = () => {
@@ -796,7 +798,7 @@
                 this.hideHoverCard();
             });
 
-            const grabBtn = document.getElementById('grab-btn');
+            const grabBtn = this.elements['grab-btn'];
             grabBtn.addEventListener('mouseenter', () => {
                 if (![...STATE.courseConflicts.values()].some(conflicts => conflicts.length > 0)) {
                     this.hideHoverCard();
@@ -821,13 +823,13 @@
                 }
             });
 
-            document.getElementById('skip-captcha-checkbox').addEventListener('change', (e) => {
+            this.elements['skip-captcha-checkbox'].addEventListener('change', (e) => {
                 SettingsStore.update({skipCaptcha: e.target.checked});
             });
-            document.getElementById('concurrency-slider').addEventListener('input', (e) => {
+            this.elements['concurrency-slider'].addEventListener('input', (e) => {
                 SettingsStore.update({concurrency: e.target.value});
             });
-            document.getElementById('clear-btn').addEventListener('click', () => {
+            this.elements['clear-btn'].addEventListener('click', () => {
                 if (STATE.isGrabbing) {
                     alert('请先停止抢课！');
                     return;
@@ -836,7 +838,7 @@
                     CourseStore.replace([]);
                 }
             });
-            document.getElementById('reset-btn').addEventListener('click', () => {
+            this.elements['reset-btn'].addEventListener('click', () => {
                 if (STATE.isGrabbing) {
                     alert('请先停止抢课！');
                     return;
@@ -844,7 +846,7 @@
                 SessionStore.reset();
                 console.log('[抢课助手] 上下文信息已重置 ');
             });
-            document.getElementById('import-btn').addEventListener('click', () => {
+            this.elements['import-btn'].addEventListener('click', () => {
                 if (STATE.isGrabbing) {
                     alert('请先停止抢课！');
                     return;
