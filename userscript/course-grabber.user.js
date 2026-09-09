@@ -884,6 +884,7 @@
     const Persistence = {
         save() {
             const dataToSave = {
+                version: 1,
                 courses: STATE.courses,
                 studentId: STATE.studentId,
                 turnId: STATE.turnId,
@@ -891,27 +892,47 @@
                 skipCaptcha: STATE.skipCaptcha,
                 concurrency: STATE.concurrency,
             };
-            localStorage.setItem(STORAGE_KEY, JSON.stringify(dataToSave));
+            try {
+                localStorage.setItem(STORAGE_KEY, JSON.stringify(dataToSave));
+            } catch (error) {
+                console.warn('[抢课助手] 保存状态失败:', error.message || error);
+            }
         },
         load() {
-            const savedState = localStorage.getItem(STORAGE_KEY);
-            if (savedState) {
+            try {
+                const savedState = localStorage.getItem(STORAGE_KEY);
+                if (!savedState) return;
                 const parsed = JSON.parse(savedState);
-                STATE.courses = (parsed.courses ?? []).map((course) => {
-                    const lessonAssoc = normalizeLessonAssoc(course?.lessonAssoc);
-                    if (lessonAssoc === null) return null;
+                // Unversioned storage is the original format; keep it readable.
+                if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)
+                    || (parsed.version != null && parsed.version !== 1)
+                    || !Array.isArray(parsed.courses)) {
+                    throw new Error('保存的状态格式无效或版本不受支持');
+                }
+                const seen = new Set();
+                const courses = parsed.courses.filter(course => course && typeof course === 'object').map(course => {
+                    const lessonAssoc = normalizeLessonAssoc(course.lessonAssoc);
+                    if (lessonAssoc === null || seen.has(lessonAssoc)) return null;
+                    seen.add(lessonAssoc);
                     return {
                         ...course,
                         lessonAssoc,
                         status: 'pending',
-                        isPaused: Boolean(course?.isPaused),
+                        isPaused: course.isPaused === true,
+                        teacherNames: Array.isArray(course.teacherNames) ? course.teacherNames.filter(name => typeof name === 'string') : [],
+                        schedule: Array.isArray(course.schedule) ? course.schedule.filter(item => item && typeof item === 'object') : [],
+                        scheduleSummary: Array.isArray(course.scheduleSummary) ? course.scheduleSummary.filter(item => typeof item === 'string') : [],
                     };
                 }).filter(Boolean);
-                STATE.studentId = parsed.studentId ?? '';
-                STATE.turnId = parsed.turnId ?? '';
-                STATE.headers = parsed.headers ?? {};
-                STATE.skipCaptcha = parsed.skipCaptcha ?? false;
-                STATE.concurrency = normalizeConcurrency(parsed.concurrency ?? 2);
+                STATE.courses = courses;
+                STATE.studentId = String(parsed.studentId ?? '');
+                STATE.turnId = String(parsed.turnId ?? '');
+                STATE.headers = parsed.headers && typeof parsed.headers === 'object' && !Array.isArray(parsed.headers)
+                    ? Object.fromEntries(Object.entries(parsed.headers).filter(([, value]) => typeof value === 'string')) : {};
+                STATE.skipCaptcha = parsed.skipCaptcha === true;
+                STATE.concurrency = normalizeConcurrency(parsed.concurrency);
+            } catch (error) {
+                console.warn('[抢课助手] 无法恢复保存的状态，使用默认状态:', error.message || error);
             }
         }
     };
