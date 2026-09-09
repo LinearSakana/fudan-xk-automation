@@ -238,9 +238,11 @@
         } = options;
         const url = `${baseUrl}${path}`;
         const hasBody = payload != null && method !== 'GET' && method !== 'HEAD';
+        const requestHeaders = new Headers(headers);
+        if (hasBody && !requestHeaders.has('Content-Type')) requestHeaders.set('Content-Type', 'application/json');
         const response = await fetch(url, {
             method,
-            headers: {...(hasBody ? {'Content-Type': 'application/json'} : {}), ...headers},
+            headers: requestHeaders,
             body: hasBody ? JSON.stringify(payload) : undefined,
         });
         let parsed;
