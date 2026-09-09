@@ -545,6 +545,13 @@
         hoverCourseIndex: -1,
         lastRenderState: null,
         lastButtonsState: null,
+        updateConcurrencyTooltip() {
+            const slider = document.getElementById('concurrency-slider');
+            if (!slider) return;
+            const progress = (Number(slider.value) - Number(slider.min)) / (Number(slider.max) - Number(slider.min));
+            slider.parentElement.style.setProperty('--range-progress', progress);
+            document.getElementById('concurrency-value').textContent = slider.value;
+        },
         createPanel() {
             if (document.getElementById('grabber-panel')) return;
             const panel = document.createElement('div');
@@ -562,8 +569,10 @@
                         </div>
                     <div class="grabber-slider-group">
                         <label for="concurrency-slider" id="concurrency-num">并发数</label>
-                        <input type="range" id="concurrency-slider" min="1" max="10" value="2">
-                        <span id="concurrency-value" class="badge">2</span>
+                        <div class="concurrency-range">
+                            <input type="range" id="concurrency-slider" min="1" max="10" value="2">
+                            <span id="concurrency-value" class="concurrency-tooltip" aria-hidden="true">2</span>
+                        </div>
                     </div>
                     <ul id="course-list" aria-label="意向课程"></ul>
                     <div class="grabber-sub-actions">
@@ -665,8 +674,15 @@
                 #rps-value { color: #2b6cb0; font-variant-numeric: tabular-nums; }
                 .grabber-slider-group { display: flex; align-items: center; gap: 10px; padding: 6px 8px }
                 #concurrency-num { font-size: 13px; color: #4a5568; white-space: nowrap; }
-                #concurrency-slider { flex-grow: 1; accent-color: #3182ce; height: 6px; border-radius: 2px; }
-                .badge { background: #e2e8f0; color: #2d3748; padding: 2px 8px; border-radius: 10px; font-size: 12px; font-weight: 600; min-width: 24px; text-align: center; }
+                .concurrency-range { position: relative; flex: 1; min-width: 0; display: flex; align-items: center; height: 24px; --thumb-size: 14px; }
+                #concurrency-slider { appearance: none; width: 100%; margin: 0; height: 6px; border-radius: 3px; background: #e2e8f0; cursor: pointer; }
+                #concurrency-slider::-webkit-slider-thumb { appearance: none; width: var(--thumb-size); height: var(--thumb-size); border: 2px solid white; border-radius: 50%; background: #3182ce; box-shadow: 0 1px 4px rgba(43,108,176,.3); }
+                #concurrency-slider::-moz-range-thumb { box-sizing: border-box; width: var(--thumb-size); height: var(--thumb-size); border: 2px solid white; border-radius: 50%; background: #3182ce; box-shadow: 0 1px 4px rgba(43,108,176,.3); }
+                #concurrency-slider:focus-visible { outline: 2px solid #3182ce; outline-offset: 4px; }
+                .concurrency-tooltip { position: absolute; bottom: calc(100% + 4px); left: calc(var(--range-progress, 0) * (100% - var(--thumb-size)) + var(--thumb-size) / 2); padding: 3px 7px; border-radius: 7px; background: linear-gradient(135deg, #2b6cb0, #3182ce); color: white; font-size: 11px; font-weight: 600; line-height: 16px; font-variant-numeric: tabular-nums; box-shadow: 0 3px 8px rgba(43,108,176,.2); pointer-events: none; opacity: 0; transform: translate(-50%, 4px) scale(.92); transition: opacity .16s ease, transform .16s ease; }
+                .concurrency-tooltip::after { content: ''; position: absolute; top: 100%; left: 50%; margin-left: -3px; border: 3px solid transparent; border-top-color: #3182ce; }
+                .concurrency-range:hover .concurrency-tooltip, #concurrency-slider:focus-visible + .concurrency-tooltip, #concurrency-slider:active + .concurrency-tooltip { opacity: 1; transform: translate(-50%, 0) scale(1); }
+                @media (prefers-reduced-motion: reduce) { .concurrency-tooltip { transition: none; } }
                 #course-list { list-style: none; padding: 0; margin: 0; max-height: 380px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; scrollbar-width: thin; scrollbar-color: #cbd5e0 transparent; }
                 #course-list::-webkit-scrollbar { width: 6px; }
                 #course-list::-webkit-scrollbar-thumb { background-color: #cbd5e0; border-radius: 10px; }
@@ -850,10 +866,7 @@
                 concurrencySlider.value = STATE.concurrency.toString();
             }
 
-            const concurrencyValue = document.getElementById('concurrency-value');
-            if (concurrencyValue && concurrencyValue.textContent !== STATE.concurrency.toString()) {
-                concurrencyValue.textContent = STATE.concurrency.toString();
-            }
+            this.updateConcurrencyTooltip();
 
             const rpsText = STATE.rps.toString();
             const rpsEl = document.getElementById('rps-value');
@@ -1117,7 +1130,7 @@
             });
             document.getElementById('concurrency-slider').addEventListener('input', (e) => {
                 STATE.concurrency = parseInt(e.target.value, 10);
-                document.getElementById('concurrency-value').textContent = STATE.concurrency;
+                this.updateConcurrencyTooltip();
                 Persistence.save();
             });
             document.getElementById('clear-btn').addEventListener('click', () => {
