@@ -8,9 +8,9 @@
 // @icon         https://id.fudan.edu.cn/ac/favicon.ico
 // @grant        none
 // @run-at       document-start
-// @require      https://raw.githubusercontent.com/LinearSakana/fudan-xk-automation/main/userscript/course-grabber-ui.js
-// @updateURL    https://github.com/LinearSakana/fudan-xk-automation/raw/main/userscript/course-grabber.user.js
-// @downloadURL  https://github.com/LinearSakana/fudan-xk-automation/raw/main/userscript/course-grabber.user.js
+// @require      https://cdn.jsdelivr.net/gh/LinearSakana/fudan-xk-automation@main/userscript/course-grabber-ui.js
+// @updateURL    https://cdn.jsdelivr.net/gh/LinearSakana/fudan-xk-automation@main/userscript/course-grabber.user.js
+// @downloadURL  https://cdn.jsdelivr.net/gh/LinearSakana/fudan-xk-automation@main/userscript/course-grabber.user.js
 // ==/UserScript==
 
 (function () {
