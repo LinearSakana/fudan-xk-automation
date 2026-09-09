@@ -578,7 +578,7 @@
             const studentIdText = STATE.studentId ? STATE.studentId : '未捕获';
             if (studentIdEl) {
                 if (STATE.courses.some(course => ExecutionEngine.isCourseInfoIncomplete(course))) {
-                    studentIdEl.textContent = '课程信息待补全';
+                    studentIdEl.textContent = '状态已过期';
                 } else {
                     studentIdEl.textContent = 'ID: ' + studentIdText;
                 }
