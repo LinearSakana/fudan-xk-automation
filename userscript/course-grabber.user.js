@@ -557,16 +557,9 @@
                     <span id="header-student-id" class="header-student-id" title="StudentID" style="display: none;"></span>
                 </div>
                 <div class="grabber-body">
-                    <div class="grabber-controls">
-                        <label class="checkbox-label" title="跳过滑动验证码（按需设置）">
-                            <input type="checkbox" id="skip-captcha-checkbox">
-                            <span class="checkmark"></span>
-                            跳过验证
-                        </label>
                     <div class="rps-display" title="本地服务状态" aria-label="本地服务状态">
                             RPS: <span id="rps-value">0</span> | Workers: <span id="workers-value">0</span>
                         </div>
-                    </div>
                     <div class="grabber-slider-group">
                         <label for="concurrency-slider" id="concurrency-num">并发数</label>
                         <input type="range" id="concurrency-slider" min="1" max="10" value="2">
@@ -580,6 +573,13 @@
                     </div>
                     <div class="grabber-actions">
                         <button id="grab-btn" class="btn-start">开始抢课</button>
+                    </div>
+                    <div class="grabber-controls">
+                        <label class="checkbox-label" title="跳过滑动验证码（按需设置）">
+                            <input type="checkbox" id="skip-captcha-checkbox">
+                            <span class="checkmark"></span>
+                            跳过验证
+                        </label>
                     </div>
                 </div>
             `;
@@ -654,7 +654,7 @@
                 .grabber-title { font-weight: 400; font-size: 14px; letter-spacing: 0.5px; }
                 .header-student-id { font-size: 12px; opacity: 0.9; background: rgba(255,255,255,0.2); padding: 2px 8px; border-radius: 12px; font-variant-numeric: tabular-nums; }
                 .grabber-body { padding: 14px; display: flex; flex-direction: column; gap: 10px; }
-                .grabber-controls { display: flex; justify-content: space-between; align-items: center; }
+                .grabber-controls { display: flex; flex-wrap: wrap; justify-content: flex-start; align-items: center; gap: 6px 12px; margin-top: -4px; }
                 .checkbox-label { display: flex; align-items: center; gap: 6px; cursor: pointer; font-size: 13px; color: #4a5568; user-select: none; }
                 .checkbox-label input { position: absolute; width: 1px; height: 1px; opacity: 0; }
                 .checkbox-label input:focus-visible + .checkmark { outline: 2px solid #3182ce; outline-offset: 2px; }
