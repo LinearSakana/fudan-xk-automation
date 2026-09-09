@@ -232,16 +232,26 @@
             baseUrl = SERVER_BASE_URL,
             headers = {},
         } = options;
-        const response = await fetch(`${baseUrl}${path}`, {
+        const url = `${baseUrl}${path}`;
+        const response = await fetch(url, {
             method,
             headers: {'Content-Type': 'application/json', ...headers},
             body: payload ? JSON.stringify(payload) : undefined,
         });
         const parsed = await response.json().catch(() => ({}));
         if (!response.ok) {
-            const error = new Error(parsed.error || parsed.message || `HTTP ${response.status}`);
+            const serverMessage = parsed?.error || parsed?.message;
+            const message = [
+                serverMessage || 'API request failed',
+                `${method} ${url}`,
+                `HTTP ${response.status}${response.statusText ? ` ${response.statusText}` : ''}`,
+            ].join(' - ');
+            const error = new Error(message);
             error.status = response.status;
+            error.statusText = response.statusText;
             error.data = parsed;
+            error.method = method;
+            error.url = url;
             throw error;
         }
         return parsed;
