@@ -237,12 +237,27 @@
             headers = {},
         } = options;
         const url = `${baseUrl}${path}`;
+        const hasBody = payload != null && method !== 'GET' && method !== 'HEAD';
         const response = await fetch(url, {
             method,
-            headers: {'Content-Type': 'application/json', ...headers},
-            body: payload ? JSON.stringify(payload) : undefined,
+            headers: {...(hasBody ? {'Content-Type': 'application/json'} : {}), ...headers},
+            body: hasBody ? JSON.stringify(payload) : undefined,
         });
-        const parsed = await response.json().catch(() => ({}));
+        let parsed;
+        try {
+            parsed = await response.json();
+        } catch (cause) {
+            const error = new Error(`API 返回了无效 JSON - ${method} ${url} - HTTP ${response.status}`, {cause});
+            error.name = 'ProtocolError';
+            error.status = response.status;
+            throw error;
+        }
+        if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+            const error = new Error(`API 响应必须是 JSON 对象 - ${method} ${url} - HTTP ${response.status}`);
+            error.name = 'ProtocolError';
+            error.status = response.status;
+            throw error;
+        }
         if (!response.ok) {
             const serverMessage = parsed?.error || parsed?.message;
             const message = [
