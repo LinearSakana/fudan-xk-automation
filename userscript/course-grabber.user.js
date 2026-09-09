@@ -734,12 +734,7 @@
                 }
 
                 if (fromIndex !== insertIndex) {
-                    const [course] = STATE.courses.splice(fromIndex, 1);
-                    STATE.courses.splice(insertIndex, 0, course);
-
-                    Persistence.save();
-                    rebuildConflicts();
-                    this.render();
+                    CourseStore.move(fromIndex, insertIndex);
                 }
 
                 draggingIndex = null;
@@ -768,10 +763,7 @@
                 }
 
                 if (target.dataset.action === 'delete') {
-                    STATE.courses.splice(index, 1);
-                    rebuildConflicts();
-                    Persistence.save();
-                    this.render();
+                    CourseStore.remove(index);
                 }
             });
             this.courseListEl.addEventListener('mousemove', (e) => {
@@ -831,13 +823,10 @@
             });
 
             document.getElementById('skip-captcha-checkbox').addEventListener('change', (e) => {
-                STATE.skipCaptcha = e.target.checked;
-                Persistence.save();
+                SettingsStore.update({skipCaptcha: e.target.checked});
             });
             document.getElementById('concurrency-slider').addEventListener('input', (e) => {
-                STATE.concurrency = parseInt(e.target.value, 10);
-                this.updateConcurrencyTooltip();
-                Persistence.save();
+                SettingsStore.update({concurrency: e.target.value});
             });
             document.getElementById('clear-btn').addEventListener('click', () => {
                 if (STATE.isGrabbing) {
@@ -845,10 +834,7 @@
                     return;
                 }
                 if (confirm('确定要清空所有意向课程吗？')) {
-                    STATE.courses = [];
-                    STATE.courseConflicts.clear();
-                    Persistence.save();
-                    this.render();
+                    CourseStore.replace([]);
                 }
             });
             document.getElementById('reset-btn').addEventListener('click', () => {
@@ -864,11 +850,62 @@
                     alert('请先停止抢课！');
                     return;
                 }
-                STATE.isImporting = true;
-                this.render();
+                SettingsStore.update({isImporting: true});
                 alert('导入模式已开启！请在选课页面进行一次翻页或筛选操作，脚本即自动捕获当前页所有课程 ');
             });
         }
+    };
+
+    // Course mutations own conflict rebuilding, persistence and notification.
+    const CourseStore = {
+        replace(courses) {
+            STATE.courses = courses;
+            rebuildConflicts();
+            Persistence.save();
+            UI.render();
+        },
+        setSelected(courses) {
+            STATE.selectedCourses = courses;
+            rebuildConflicts();
+            UI.render();
+        },
+        add(ids) {
+            const seen = new Set(STATE.courses.map(course => course.lessonAssoc));
+            const added = [];
+            for (const id of ids) {
+                const lessonAssoc = normalizeLessonAssoc(id);
+                if (lessonAssoc === null || seen.has(lessonAssoc)) continue;
+                seen.add(lessonAssoc);
+                added.push({lessonAssoc, status: 'pending', isPaused: false});
+            }
+            if (added.length) this.replace([...STATE.courses, ...added]);
+            return added.length;
+        },
+        remove(index) {
+            this.replace(STATE.courses.filter((_, courseIndex) => courseIndex !== index));
+        },
+        move(from, to) {
+            const courses = [...STATE.courses];
+            const [course] = courses.splice(from, 1);
+            courses.splice(to, 0, course);
+            this.replace(courses);
+        },
+        updateDetails(infos) {
+            const byId = new Map(infos.map(info => [info.lessonAssoc, info]));
+            if (STATE.courses.some(course => byId.has(course.lessonAssoc))) {
+                this.replace(STATE.courses.map(course => ({...course, ...byId.get(course.lessonAssoc)})));
+            }
+        },
+    };
+
+    const SettingsStore = {
+        update(settings) {
+            if ('skipCaptcha' in settings) STATE.skipCaptcha = Boolean(settings.skipCaptcha);
+            if ('concurrency' in settings) STATE.concurrency = normalizeConcurrency(settings.concurrency);
+            if ('isImporting' in settings) STATE.isImporting = Boolean(settings.isImporting);
+            Persistence.save();
+            UI.render();
+        },
     };
 
     // Session headers and identifiers are replaced together; header identity invalidates old requests.
@@ -877,8 +914,7 @@
             if (studentId == null || turnId == null) throw new Error('选课请求缺少会话信息');
             const nextStudentId = String(studentId), nextTurnId = String(turnId);
             if (STATE.studentId !== nextStudentId || STATE.turnId !== nextTurnId) {
-                STATE.selectedCourses = [];
-                rebuildConflicts();
+                CourseStore.setSelected([]);
             }
             STATE.studentId = nextStudentId;
             STATE.turnId = nextTurnId;
@@ -890,7 +926,7 @@
             STATE.studentId = '';
             STATE.turnId = '';
             STATE.headers = {};
-            STATE.selectedCourses = [];
+            CourseStore.setSelected([]);
             STATE.rps = 0;
             STATE.workers = 0;
             rebuildConflicts();
@@ -962,28 +998,15 @@
             const lessonAssoc = normalizeLessonAssoc(payload?.requestMiddleDtos?.[0]?.lessonAssoc);
             if (lessonAssoc === null) return;
             SessionStore.capture(payload.studentAssoc, payload.courseSelectTurnAssoc, headers);
-            if (!STATE.courses.some(course => course.lessonAssoc === lessonAssoc)) {
-                STATE.courses.push({lessonAssoc, status: 'pending', isPaused: false});
-                rebuildConflicts();
-            }
-            Persistence.save();
+            CourseStore.add([lessonAssoc]);
             ExecutionEngine.refreshMissingCourseDetails();
             UI.render();
         },
         importLessons(ids) {
             if (!STATE.isImporting) return;
-            let importedCount = 0;
-            ids.forEach(id => {
-                const lessonAssoc = normalizeLessonAssoc(id);
-                if (lessonAssoc !== null && !STATE.courses.some(course => course.lessonAssoc === lessonAssoc)) {
-                    STATE.courses.push({lessonAssoc, status: 'pending', isPaused: false});
-                    importedCount++;
-                }
-            });
+            const importedCount = CourseStore.add(ids);
             console.log(`[抢课助手] 导入 ${importedCount} 门新课程`);
-            STATE.isImporting = false;
-            rebuildConflicts();
-            Persistence.save();
+            SettingsStore.update({isImporting: false});
             ExecutionEngine.refreshMissingCourseDetails();
             UI.render();
         },
@@ -1084,19 +1107,7 @@
                 this.refreshSelectedCourses().catch(error => console.warn('[抢课助手] 冲突检查课表同步失败:', error.message || error)),
             ]);
             if (STATE.headers !== headers) return [];
-            const infoByLessonAssoc = new Map(infos.map(info => [info.lessonAssoc, info]));
-            let updated = false;
-            STATE.courses = STATE.courses.map(course => {
-                const info = infoByLessonAssoc.get(course.lessonAssoc);
-                if (!info) return course;
-                updated = true;
-                return {...course, ...info};
-            });
-            if (updated) {
-                Persistence.save();
-            }
-            rebuildConflicts();
-            UI.render();
+            CourseStore.updateDetails(infos);
             return infos;
         },
         async fetchSelectedCourses() {
@@ -1121,8 +1132,7 @@
             const headers = STATE.headers;
             const selectedCourses = await this.fetchSelectedCourses();
             if (STATE.headers !== headers) throw new Error('会话已变更，忽略旧课表');
-            STATE.selectedCourses = selectedCourses;
-            rebuildConflicts();
+            CourseStore.setSelected(selectedCourses);
             return selectedCourses;
         },
         async syncSelectedCourses() {
@@ -1162,14 +1172,11 @@
                     }
                 }
 
-                STATE.courses = STATE.courses.map(course => {
+                CourseStore.replace(STATE.courses.map(course => {
                     if (!confirmedSelectedIds.has(course.lessonAssoc)) return course;
                     STATE.toBeRemoved.add(course.lessonAssoc);
                     return {...course, ...selectedById.get(course.lessonAssoc)};
-                });
-                Persistence.save();
-                rebuildConflicts();
-                UI.render();
+                }));
             } finally {
                 this.isSelectedCoursesSyncing = false;
             }
@@ -1188,7 +1195,7 @@
             if (byId.size === 0) return;
 
             let changed = false;
-            STATE.courses = STATE.courses.map((course) => {
+            const courses = STATE.courses.map((course) => {
                 const serverCourse = byId.get(course.lessonAssoc);
                 if (!serverCourse) return course;
 
@@ -1217,9 +1224,7 @@
                 return nextCourse;
             });
 
-            if (changed) {
-                Persistence.save();
-            }
+            if (changed) CourseStore.replace(courses);
         },
         handleServerError(status) {
             const serverError = status?.error;
@@ -1266,10 +1271,10 @@
 
             STATE.concurrency = normalizeConcurrency(STATE.concurrency);
             STATE.toBeRemoved.clear();
-            STATE.courses.forEach(c => {
-                c.status = 'pending';
-                delete c.selectedConfirmed;
-            });
+            CourseStore.replace(STATE.courses.map(course => {
+                const {selectedConfirmed, ...details} = course;
+                return {...details, status: 'pending'};
+            }));
             await this.syncCourseDetails(STATE.courses.map(c => c.lessonAssoc)).catch(error => {
                 console.warn('[抢课助手] 抢课前详情同步失败，继续使用已有信息:', error.message || error);
             });
@@ -1306,20 +1311,13 @@
                 ((stopResult?.removedCourses || []).map(id => normalizeLessonAssoc(id)).filter(id => id !== null))
             ).map(Number);
             const removedSet = new Set([...STATE.toBeRemoved, ...removedCourses]);
-            if (removedSet.size > 0) {
-                STATE.courses = STATE.courses.filter(course => !removedSet.has(course.lessonAssoc));
-            }
             STATE.toBeRemoved.clear();
-            STATE.courses.forEach((course) => {
-                course.isPaused = false;
-                if (course.status !== 'success') {
-                    course.status = 'pending';
-                }
-            });
-            Persistence.save();
             this.stopPolling();
-            rebuildConflicts();
-            UI.render();
+            CourseStore.replace(STATE.courses.filter(course => !removedSet.has(course.lessonAssoc)).map(course => ({
+                ...course,
+                isPaused: false,
+                status: course.status === 'success' ? 'success' : 'pending',
+            })));
         },
         async pollGrabStatus() {
             let status = await requestApi('/status', 'GET');
