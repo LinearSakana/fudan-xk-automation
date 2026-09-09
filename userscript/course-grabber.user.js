@@ -564,14 +564,15 @@
                     <span id="header-student-id" class="header-student-id" title="StudentID" style="display: none;"></span>
                 </div>
                 <div class="grabber-body">
-                    <div class="rps-display" title="本地服务状态" aria-label="本地服务状态">
-                            RPS: <span id="rps-value">0</span> | Workers: <span id="workers-value">0</span>
-                        </div>
                     <div class="grabber-slider-group">
                         <label for="concurrency-slider" id="concurrency-num">并发数</label>
                         <div class="concurrency-range">
                             <input type="range" id="concurrency-slider" min="1" max="10" value="2">
                             <span id="concurrency-value" class="concurrency-tooltip" aria-hidden="true">2</span>
+                        </div>
+                        <div class="rps-display" title="本地服务状态">
+                            <span class="grabber-metric">RPS <span id="rps-value">0</span></span>
+                            <span class="grabber-metric">Workers <span id="workers-value">0</span></span>
                         </div>
                     </div>
                     <ul id="course-list" aria-label="意向课程"></ul>
@@ -670,8 +671,18 @@
                 .checkmark { width: 16px; height: 16px; border: 2px solid #cbd5e0; border-radius: 4px; display: inline-block; position: relative; transition: all 0.2s; }
                 .checkbox-label input:checked + .checkmark { background: #3182ce; border-color: #3182ce; }
                 .checkbox-label input:checked + .checkmark::after { content: ''; position: absolute; left: 4px; top: 1px; width: 4px; height: 8px; border: solid white; border-width: 0 2px 2px 0; transform: rotate(45deg); }
-                .rps-display { font-size: 13px; color: #4a5568; background: #edf2f7; padding: 4px 10px; border-radius: 12px; font-weight: 500; }
-                #rps-value { color: #2b6cb0; font-variant-numeric: tabular-nums; }
+                .rps-display { display: grid; flex-shrink: 0; overflow: hidden; padding: 4px 8px; border: 1px solid #e2e8f0; border-radius: 9px; background: linear-gradient(135deg, #f7fafc, #edf2f7); color: #718096; font-size: 11px; line-height: 18px; }
+                .grabber-metric { grid-area: 1 / 1; display: flex; align-items: center; justify-content: space-between; gap: 6px; white-space: nowrap; animation: grabber-metric-cycle 6s ease-in-out infinite; }
+                .grabber-metric:nth-child(2) { animation-delay: -3s; }
+                #rps-value, #workers-value { color: #2b6cb0; font-weight: 600; font-variant-numeric: tabular-nums; }
+                @keyframes grabber-metric-cycle {
+                    0%, 42%, 100% { opacity: 1; transform: translateY(0); }
+                    50% { opacity: 0; transform: translateY(-12px); }
+                    50.01%, 92% { opacity: 0; transform: translateY(12px); }
+                }
+                @media (prefers-reduced-motion: reduce) {
+                    .grabber-metric { grid-area: auto; animation: none; }
+                }
                 .grabber-slider-group { display: flex; align-items: center; gap: 10px; padding: 6px 8px }
                 #concurrency-num { font-size: 13px; color: #4a5568; white-space: nowrap; }
                 .concurrency-range { position: relative; flex: 1; min-width: 0; display: flex; align-items: center; height: 24px; --thumb-size: 14px; }
