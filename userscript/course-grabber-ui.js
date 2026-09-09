@@ -1,4 +1,4 @@
-// @version      0.1
+// @version      0.2
 // @compatible   course-grabber.user.js >= 0.3.3
 // @description  UI resources loaded by course-grabber.user.js via @require.
 
@@ -49,7 +49,7 @@
                     <ol style="padding-left: 22px;">
                         <li>初次或间隔了很长时间打开选课网页</li>
                         <li>在别的标签页打开过选课网页</li>
-                        <li>悬浮窗右上角提示“状态已过期”</li>
+                        <li>悬浮窗右上角持续提示“状态已过期”</li>
                         <li>其他任何异常情况</li>
                         <li>以防万一，抢课开始前也可以重置一次</li>
                     </ol>

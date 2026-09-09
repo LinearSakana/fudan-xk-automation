@@ -1,14 +1,14 @@
 // ==UserScript==
 // @name         复旦选课助手
 // @namespace    https://github.com/LinearSakana/fudan-xk-automation
-// @version      0.3.3
+// @version      0.3.4
 // @description  复旦大学本科生选课助手，使用前请确保已启动本地 Server
 // @author       LinearSakana
 // @match        *://xk.fudan.edu.cn/*
 // @icon         https://id.fudan.edu.cn/ac/favicon.ico
 // @grant        none
 // @run-at       document-start
-// @require      https://cdn.jsdelivr.net/gh/LinearSakana/fudan-xk-automation@main/userscript/course-grabber-ui.js?v=0.1
+// @require      https://cdn.jsdelivr.net/gh/LinearSakana/fudan-xk-automation@main/userscript/course-grabber-ui.js?v=0.2
 // @updateURL    https://cdn.jsdelivr.net/gh/LinearSakana/fudan-xk-automation@main/userscript/course-grabber.user.js
 // @downloadURL  https://cdn.jsdelivr.net/gh/LinearSakana/fudan-xk-automation@main/userscript/course-grabber.user.js
 // ==/UserScript==
@@ -24,23 +24,19 @@
     const STORAGE_KEY = 'fudan_course_grabber_state';
     const FIRST_RUN_NOTICE_KEY = 'first_run_notice_v2';
     const STATE = {
-        courses: [], // 意向课程列表 { lessonAssoc: number, status: 'pending' | 'success', isPaused?: boolean, courseName?: string, teacherNames?: string[], schedule?: object[] }
+        courses: [], // 课程可处于如下状态： 'pending' | 'paused' | 'success' | 'selected'
         selectedCourses: [],
         courseConflicts: new Map(), // lessonAssoc -> Array<{ lessonAssoc, lessonNameZh }>
         studentId: '',
         turnId: '',
-        headers: {}, // 从原始请求中捕获的全局 HTTP 头
+        headers: {}, // 自动捕获的全局 HTTP 头
         isGrabbing: false,
         skipCaptcha: false, // 是否跳过验证码
         isImporting: false,
         concurrency: 2, // 每门课并发实例数量
         rps: 0,
         workers: 0,
-        grabStatusIntvId: null,
-        syncSelectedCoursesIntvId: null,
-        toBeRemoved: new Set(),
         serverErrorNoticeKey: '',
-        hasIncompleteCourseInfo: false,
     };
     const WEEKDAY_LABELS = ['', '周一', '周二', '周三', '周四', '周五', '周六', '周日'];
 
@@ -216,6 +212,10 @@
         STATE.courseConflicts = buildCourseConflicts(STATE.courses, STATE.selectedCourses);
     }
 
+    function isCourseSuccessful(course) {
+        return course.status === 'success' || course.status === 'selected';
+    }
+
     function getCoursePayload() {
         const seen = new Set();
         const courses = [];
@@ -225,7 +225,7 @@
             seen.add(lessonAssoc);
             courses.push({
                 lessonAssoc,
-                isPaused: Boolean(course.isPaused),
+                isPaused: course.status === 'paused' || course.status === 'selected',
             });
         });
         return courses;
@@ -237,12 +237,30 @@
             headers = {},
         } = options;
         const url = `${baseUrl}${path}`;
+        const hasBody = payload != null && method !== 'GET' && method !== 'HEAD';
+        const requestHeaders = new Headers(headers);
+        if (hasBody && !requestHeaders.has('Content-Type')) requestHeaders.set('Content-Type', 'application/json');
         const response = await fetch(url, {
             method,
-            headers: {'Content-Type': 'application/json', ...headers},
-            body: payload ? JSON.stringify(payload) : undefined,
+            headers: requestHeaders,
+            body: hasBody ? JSON.stringify(payload) : undefined,
         });
-        const parsed = await response.json().catch(() => ({}));
+        let parsed;
+        try {
+            parsed = await response.json();
+        } catch (cause) {
+            const error = new Error(`API 返回了无效 JSON - ${method} ${url} - HTTP ${response.status}`);
+            error.cause = cause;
+            error.name = 'ProtocolError';
+            error.status = response.status;
+            throw error;
+        }
+        if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+            const error = new Error(`API 响应必须是 JSON 对象 - ${method} ${url} - HTTP ${response.status}`);
+            error.name = 'ProtocolError';
+            error.status = response.status;
+            throw error;
+        }
         if (!response.ok) {
             const serverMessage = parsed?.error || parsed?.message;
             const message = [
@@ -295,7 +313,7 @@
             if (!this.panel) this.create();
             if (!this.panel.hidden) return;
             this.panel.hidden = false;
-            document.getElementById('timetable-btn').setAttribute('aria-expanded', 'true');
+            UI.elements['timetable-btn'].setAttribute('aria-expanded', 'true');
             this.panel.querySelector('[data-action="close"]').focus();
             await this.refresh();
         },
@@ -313,8 +331,8 @@
             const close = () => {
                 panel.hidden = true;
                 UI.hideHoverCard();
-                document.getElementById('timetable-btn').setAttribute('aria-expanded', 'false');
-                document.getElementById('timetable-btn').focus();
+                UI.elements['timetable-btn'].setAttribute('aria-expanded', 'false');
+                UI.elements['timetable-btn'].focus();
             };
             panel.querySelector('[data-action="close"]').addEventListener('click', close);
             panel.addEventListener('keydown', event => {
@@ -372,7 +390,7 @@
                     throw new Error('请先手动点一次选课，捕获状态后再刷新课表');
                 }
                 const studentId = STATE.studentId, turnId = STATE.turnId, headers = STATE.headers;
-                const selected = await ExecutionEngine.querySelectedCourses();
+                const selected = await ExecutionEngine.refreshSelectedCourses();
                 if (studentId !== STATE.studentId || turnId !== STATE.turnId || headers !== STATE.headers) {
                     throw new Error('状态已变更，请重新捕获状态后再刷新课表');
                 }
@@ -449,18 +467,18 @@
     // --- UI 模块 ---
     const UI = {
         panel: null,
+        elements: {},
         courseListEl: null,
         hoverCardEl: null,
         hoverTriggerEl: null,
         hoverCourseIndex: -1,
-        lastRenderState: null,
-        lastButtonsState: null,
+        lastCourseMarkup: null,
         updateConcurrencyTooltip() {
-            const slider = document.getElementById('concurrency-slider');
+            const slider = this.elements['concurrency-slider'];
             if (!slider) return;
             const progress = (Number(slider.value) - Number(slider.min)) / (Number(slider.max) - Number(slider.min));
-            slider.parentElement.style.setProperty('--range-progress', progress);
-            document.getElementById('concurrency-value').textContent = slider.value;
+            slider.parentElement.style.setProperty('--range-progress', String(progress));
+            this.elements['concurrency-value'].textContent = slider.value;
         },
         createPanel() {
             if (document.getElementById('grabber-panel')) return;
@@ -471,7 +489,8 @@
             panel.innerHTML = UI_ASSETS.panel;
             document.body.appendChild(panel);
             this.panel = panel;
-            this.courseListEl = document.getElementById('course-list');
+            this.elements = Object.fromEntries(Array.from(panel.querySelectorAll('[id]'), element => [element.id, element]));
+            this.courseListEl = this.elements['course-list'];
             this.ensureHoverCard();
             this.applyStyles();
             this.makeDraggable(panel, panel.querySelector('.grabber-header'));
@@ -516,11 +535,9 @@
                 this.hoverTriggerEl = trigger;
                 this.hoverTriggerEl?.setAttribute('aria-describedby', this.hoverCardEl.id);
             }
-            if (this.hoverCourseIndex !== index) {
-                this.hoverCardEl.classList.toggle('hover-timetable', timetable);
-                this.hoverCardEl.innerHTML = this.buildCourseHoverCard(course, conflicts, timetable);
-                this.hoverCourseIndex = index;
-            }
+            this.hoverCardEl.classList.toggle('hover-timetable', timetable);
+            this.hoverCardEl.innerHTML = this.buildCourseHoverCard(course, conflicts, timetable);
+            this.hoverCourseIndex = index;
             this.hoverCardEl.classList.add('show');
             this.hoverCardEl.setAttribute('aria-hidden', 'false');
             this.positionHoverCard(clientX, clientY);
@@ -534,119 +551,114 @@
             this.hoverCourseIndex = -1;
         },
         makeDraggable(element, handle) {
-            let pos1 = 0, pos2 = 0, pos3 = 0, pos4 = 0;
-            handle.onmousedown = (e) => {
-                if (e.button !== 0 || e.target.closest('button')) return;
-                e.preventDefault();
-                pos3 = e.clientX;
-                pos4 = e.clientY;
-                document.onmouseup = () => {
-                    document.onmouseup = null;
-                    document.onmousemove = null;
+            handle.style.touchAction = 'none';
+            handle.addEventListener('pointerdown', event => {
+                if (event.button !== 0 || event.target.closest('button')) return;
+                event.preventDefault();
+                const left = element.offsetLeft, top = element.offsetTop;
+                const move = current => {
+                    if (current.pointerId !== event.pointerId) return;
+                    element.style.left = `${left + current.clientX - event.clientX}px`;
+                    element.style.top = `${top + current.clientY - event.clientY}px`;
                 };
-                document.onmousemove = (e) => {
-                    e.preventDefault();
-                    pos1 = pos3 - e.clientX;
-                    pos2 = pos4 - e.clientY;
-                    pos3 = e.clientX;
-                    pos4 = e.clientY;
-                    element.style.top = (element.offsetTop - pos2) + "px";
-                    element.style.left = (element.offsetLeft - pos1) + "px";
-                };
-            };
+                handle.setPointerCapture(event.pointerId);
+                handle.addEventListener('pointermove', move);
+                handle.addEventListener('lostpointercapture', () => handle.removeEventListener('pointermove', move), {once: true});
+            });
         },
         render() {
             if (!this.courseListEl) return;
-            const studentIdEl = document.getElementById('header-student-id');
+            this.renderSession();
+            this.renderMetrics();
+            this.renderCourses();
+            this.renderControls();
+        },
+        renderSession() {
+            const studentIdEl = this.elements['header-student-id'];
             const studentIdText = STATE.studentId ? STATE.studentId : '未捕获';
             if (studentIdEl) {
-                if (STATE.hasIncompleteCourseInfo) {
+                if (STATE.courses.some(course => ExecutionEngine.isCourseInfoIncomplete(course))) {
                     studentIdEl.textContent = '状态已过期';
                 } else {
                     studentIdEl.textContent = 'ID: ' + studentIdText;
                 }
                 studentIdEl.style.display = STATE.studentId ? 'inline-block' : 'none';
             }
-            const resetBtn = document.getElementById('reset-btn');
+            const resetBtn = this.elements['reset-btn'];
             if (resetBtn) {
-                resetBtn.classList.toggle('important-hint', STATE.hasIncompleteCourseInfo);
+                resetBtn.classList.toggle('important-hint', STATE.courses.some(course => ExecutionEngine.isCourseInfoIncomplete(course)));
             }
-            const skipCaptchaEl = document.getElementById('skip-captcha-checkbox');
+            const skipCaptchaEl = this.elements['skip-captcha-checkbox'];
             if (skipCaptchaEl && skipCaptchaEl.checked !== STATE.skipCaptcha) {
                 skipCaptchaEl.checked = STATE.skipCaptcha;
             }
 
-            const concurrencySlider = document.getElementById('concurrency-slider');
+            const concurrencySlider = this.elements['concurrency-slider'];
             if (concurrencySlider && concurrencySlider.value !== STATE.concurrency.toString()) {
                 concurrencySlider.value = STATE.concurrency.toString();
             }
 
             this.updateConcurrencyTooltip();
 
+        },
+        renderMetrics() {
             const rpsText = STATE.rps.toString();
-            const rpsEl = document.getElementById('rps-value');
+            const rpsEl = this.elements['rps-value'];
             if (rpsEl && rpsEl.textContent !== rpsText) {
                 rpsEl.textContent = rpsText;
             }
-            const workersEl = document.getElementById('workers-value');
+            const workersEl = this.elements['workers-value'];
             const workersText = STATE.workers.toString();
             if (workersEl && workersEl.textContent !== workersText) {
                 workersEl.textContent = workersText;
             }
 
-            // --- 课程列表缓存 ---
-            const currentCoursesState = STATE.courses.map(c =>
-                `${c.lessonAssoc}|${c.status}|${c.isPaused}|${c.courseName}|${c.teacherNames?.join(',')}`
-            ).join(';') + `|isGrabbing:${STATE.isGrabbing}|conflicts:${JSON.stringify([...STATE.courseConflicts])}`;
-
-            if (this.lastRenderState !== currentCoursesState) {
-                this.lastRenderState = currentCoursesState;
-                this.courseListEl.innerHTML = '';
-
-                const fragment = document.createDocumentFragment();
-                STATE.courses.forEach((course, index) => {
-                    const li = document.createElement('li');
-                    li.dataset.index = String(index);
-                    if (STATE.courseConflicts.get(Number(course.lessonAssoc))?.length) {
-                        li.classList.add('course-conflict');
-                    }
-                    if (course.isPaused && STATE.isGrabbing) {
-                        li.classList.add('course-paused');
-                    }
-                    li.innerHTML = UI_ASSETS.courseListItem(course, index, STATE.isGrabbing, escapeHtml);
-                    fragment.appendChild(li);
-                });
-                this.courseListEl.appendChild(fragment);
+        },
+        renderCourses() {
+            const markup = STATE.courses.map((course, index) => {
+                const classes = [
+                    STATE.courseConflicts.get(Number(course.lessonAssoc))?.length ? 'course-conflict' : '',
+                    course.status === 'paused' && STATE.isGrabbing ? 'course-paused' : '',
+                ].filter(Boolean).join(' ');
+                // 保持 UI 资源接口兼容性
+                const view = {...course, status: isCourseSuccessful(course) ? 'success' : 'pending', isPaused: course.status === 'paused'};
+                return `<li data-index="${index}" class="${classes}">${UI_ASSETS.courseListItem(view, index, STATE.isGrabbing, escapeHtml)}</li>`;
+            }).join('');
+            // 仅更新指标时保留显示状态
+            if (this.lastCourseMarkup !== markup) {
+                this.courseListEl.innerHTML = markup;
+                this.lastCourseMarkup = markup;
                 this.hideHoverCard();
             }
 
-            // --- 按钮状态缓存 ---
-            const currentButtonsState = `${STATE.isGrabbing}|${STATE.isImporting}`;
-            if (this.lastButtonsState !== currentButtonsState) {
-                this.lastButtonsState = currentButtonsState;
-                const grabBtn = document.getElementById('grab-btn');
-                const importBtn = document.getElementById('import-btn');
-                const resetBtn = document.getElementById('reset-btn');
-                const clearBtn = document.getElementById('clear-btn');
+        },
+        renderControls() {
+            const resetBtn = this.elements['reset-btn'];
+            const grabBtn = this.elements['grab-btn'];
+            const importBtn = this.elements['import-btn'];
+            const clearBtn = this.elements['clear-btn'];
 
-                if (STATE.isGrabbing) {
-                    grabBtn.textContent = '停止抢课';
-                    grabBtn.classList.add('grabbing');
-                    importBtn.disabled = true;
-                    resetBtn.disabled = true;
-                    clearBtn.disabled = true;
-                } else {
-                    grabBtn.textContent = '开始抢课';
-                    grabBtn.classList.remove('grabbing');
-                    importBtn.disabled = STATE.isImporting;
-                    resetBtn.disabled = false;
-                    clearBtn.disabled = false;
-                }
-                importBtn.textContent = STATE.isImporting ? '正在导入...' : '导入页面';
+            if (STATE.isGrabbing) {
+                grabBtn.textContent = '停止抢课';
+                grabBtn.classList.add('grabbing');
+                importBtn.disabled = true;
+                resetBtn.disabled = true;
+                clearBtn.disabled = true;
+            } else {
+                grabBtn.textContent = '开始抢课';
+                grabBtn.classList.remove('grabbing');
+                importBtn.disabled = STATE.isImporting;
+                resetBtn.disabled = false;
+                clearBtn.disabled = false;
             }
+            grabBtn.disabled = ExecutionEngine.isCommandPending;
+            if (ExecutionEngine.isCommandPending) {
+                importBtn.disabled = resetBtn.disabled = clearBtn.disabled = true;
+            }
+            importBtn.textContent = STATE.isImporting ? '正在导入...' : '导入页面';
         },
         addEventListeners() {
-            document.getElementById('timetable-btn').addEventListener('click', () => Timetable.open());
+            this.elements['timetable-btn'].addEventListener('click', () => Timetable.open());
 
             let draggingIndex = null;
             const clearDragIndicators = () => {
@@ -720,12 +732,7 @@
                 }
 
                 if (fromIndex !== insertIndex) {
-                    const [course] = STATE.courses.splice(fromIndex, 1);
-                    STATE.courses.splice(insertIndex, 0, course);
-
-                    Persistence.save();
-                    rebuildConflicts();
-                    this.render();
+                    CourseStore.move(fromIndex, insertIndex);
                 }
 
                 draggingIndex = null;
@@ -744,9 +751,9 @@
                 if (!course) return;
 
                 if (STATE.isGrabbing) {
-                    if (target.dataset.action !== 'toggle-pause' || course.status === 'success') return;
+                    if (target.dataset.action !== 'toggle-pause' || isCourseSuccessful(course)) return;
                     try {
-                        await ExecutionEngine.toggleCoursePause(course.lessonAssoc, !course.isPaused);
+                        await ExecutionEngine.runCommand(() => ExecutionEngine.toggleCoursePause(course.lessonAssoc, course.status !== 'paused'));
                     } catch (error) {
                         alert(`课程状态切换失败: ${error.message || error}`);
                     }
@@ -754,10 +761,7 @@
                 }
 
                 if (target.dataset.action === 'delete') {
-                    STATE.courses.splice(index, 1);
-                    rebuildConflicts();
-                    Persistence.save();
-                    this.render();
+                    CourseStore.remove(index);
                 }
             });
             this.courseListEl.addEventListener('mousemove', (e) => {
@@ -791,7 +795,7 @@
                 this.hideHoverCard();
             });
 
-            const grabBtn = document.getElementById('grab-btn');
+            const grabBtn = this.elements['grab-btn'];
             grabBtn.addEventListener('mouseenter', () => {
                 if (![...STATE.courseConflicts.values()].some(conflicts => conflicts.length > 0)) {
                     this.hideHoverCard();
@@ -807,68 +811,132 @@
             grabBtn.addEventListener('click', async () => {
                 try {
                     if (STATE.isGrabbing) {
-                        await ExecutionEngine.stop();
+                        await ExecutionEngine.runCommand(() => ExecutionEngine.stop());
                     } else {
-                        await ExecutionEngine.start();
+                        await ExecutionEngine.runCommand(() => ExecutionEngine.start());
                     }
                 } catch (error) {
                     alert(`请求本地服务失败: ${error.message || error}`);
                 }
             });
 
-            document.getElementById('skip-captcha-checkbox').addEventListener('change', (e) => {
-                STATE.skipCaptcha = e.target.checked;
-                Persistence.save();
+            this.elements['skip-captcha-checkbox'].addEventListener('change', (e) => {
+                SettingsStore.update({skipCaptcha: e.target.checked});
             });
-            document.getElementById('concurrency-slider').addEventListener('input', (e) => {
-                STATE.concurrency = parseInt(e.target.value, 10);
-                this.updateConcurrencyTooltip();
-                Persistence.save();
+            this.elements['concurrency-slider'].addEventListener('input', (e) => {
+                SettingsStore.update({concurrency: e.target.value});
             });
-            document.getElementById('clear-btn').addEventListener('click', () => {
+            this.elements['clear-btn'].addEventListener('click', () => {
                 if (STATE.isGrabbing) {
                     alert('请先停止抢课！');
                     return;
                 }
                 if (confirm('确定要清空所有意向课程吗？')) {
-                    STATE.courses = [];
-                    STATE.courseConflicts.clear();
-                    Persistence.save();
-                    this.render();
+                    CourseStore.replace([]);
                 }
             });
-            document.getElementById('reset-btn').addEventListener('click', () => {
+            this.elements['reset-btn'].addEventListener('click', () => {
                 if (STATE.isGrabbing) {
                     alert('请先停止抢课！');
                     return;
                 }
-                STATE.studentId = '';
-                STATE.turnId = '';
-                STATE.headers = {};
-                STATE.selectedCourses = [];
-                rebuildConflicts();
-                STATE.rps = 0;
-                STATE.workers = 0;
-                Persistence.save();
-                this.render();
+                SessionStore.reset();
                 console.log('[抢课助手] 上下文信息已重置 ');
             });
-            document.getElementById('import-btn').addEventListener('click', () => {
+            this.elements['import-btn'].addEventListener('click', () => {
                 if (STATE.isGrabbing) {
                     alert('请先停止抢课！');
                     return;
                 }
-                STATE.isImporting = true;
-                this.render();
+                SettingsStore.update({isImporting: true});
                 alert('导入模式已开启！请在选课页面进行一次翻页或筛选操作，脚本即自动捕获当前页所有课程 ');
             });
         }
+    };
+
+    const CourseStore = {
+        replace(courses) {
+            STATE.courses = courses;
+            rebuildConflicts();
+            Persistence.save();
+            UI.render();
+        },
+        setSelected(courses) {
+            STATE.selectedCourses = courses;
+            rebuildConflicts();
+            UI.render();
+        },
+        add(ids) {
+            const seen = new Set(STATE.courses.map(course => course.lessonAssoc));
+            const added = [];
+            for (const id of ids) {
+                const lessonAssoc = normalizeLessonAssoc(id);
+                if (lessonAssoc === null || seen.has(lessonAssoc)) continue;
+                seen.add(lessonAssoc);
+                added.push({lessonAssoc, status: 'pending', removeAfterStop: false});
+            }
+            if (added.length) this.replace([...STATE.courses, ...added]);
+            return added.length;
+        },
+        remove(index) {
+            this.replace(STATE.courses.filter((_, courseIndex) => courseIndex !== index));
+        },
+        move(from, to) {
+            const courses = [...STATE.courses];
+            const [course] = courses.splice(from, 1);
+            courses.splice(to, 0, course);
+            this.replace(courses);
+        },
+        updateDetails(infos) {
+            const byId = new Map(infos.map(info => [info.lessonAssoc, info]));
+            if (STATE.courses.some(course => byId.has(course.lessonAssoc))) {
+                this.replace(STATE.courses.map(course => ({...course, ...byId.get(course.lessonAssoc)})));
+            }
+        },
+    };
+
+    const SettingsStore = {
+        update(settings) {
+            if ('skipCaptcha' in settings) STATE.skipCaptcha = Boolean(settings.skipCaptcha);
+            if ('concurrency' in settings) STATE.concurrency = normalizeConcurrency(settings.concurrency);
+            if ('isImporting' in settings) STATE.isImporting = Boolean(settings.isImporting);
+            Persistence.save();
+            UI.render();
+        },
+    };
+
+    // 请求头发生变化时，旧请求将失效
+    const SessionStore = {
+        capture(studentId, turnId, headers) {
+            if (studentId == null || turnId == null) throw new Error('选课请求缺少会话信息');
+            const nextStudentId = String(studentId), nextTurnId = String(turnId);
+            if (STATE.studentId !== nextStudentId || STATE.turnId !== nextTurnId) {
+                CourseStore.setSelected([]);
+            }
+            STATE.studentId = nextStudentId;
+            STATE.turnId = nextTurnId;
+            STATE.headers = Object.fromEntries(Object.entries(headers)
+                .filter(([name]) => !['host', 'content-length'].includes(name.toLowerCase())));
+            Persistence.save();
+        },
+        reset() {
+            STATE.studentId = '';
+            STATE.turnId = '';
+            STATE.headers = {};
+            CourseStore.setSelected([]);
+            STATE.rps = 0;
+            STATE.workers = 0;
+            rebuildConflicts();
+            Persistence.save();
+            UI.render();
+        },
     };
 
     // --- 数据持久化 ---
     const Persistence = {
         save() {
             const dataToSave = {
+                version: 1,
                 courses: STATE.courses,
                 studentId: STATE.studentId,
                 turnId: STATE.turnId,
@@ -876,137 +944,151 @@
                 skipCaptcha: STATE.skipCaptcha,
                 concurrency: STATE.concurrency,
             };
-            localStorage.setItem(STORAGE_KEY, JSON.stringify(dataToSave));
+            try {
+                localStorage.setItem(STORAGE_KEY, JSON.stringify(dataToSave));
+            } catch (error) {
+                console.warn('[抢课助手] 保存状态失败:', error.message || error);
+            }
         },
         load() {
-            const savedState = localStorage.getItem(STORAGE_KEY);
-            if (savedState) {
+            try {
+                const savedState = localStorage.getItem(STORAGE_KEY);
+                if (!savedState) return;
                 const parsed = JSON.parse(savedState);
-                STATE.courses = (parsed.courses ?? []).map((course) => {
-                    const lessonAssoc = normalizeLessonAssoc(course?.lessonAssoc);
-                    if (lessonAssoc === null) return null;
+                // 无版本号的存储数据属于旧版格式，保持向后兼容
+                if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)
+                    || (parsed.version != null && parsed.version !== 1)
+                    || !Array.isArray(parsed.courses)) {
+                    throw new Error('保存的状态格式无效或版本不受支持');
+                }
+                const seen = new Set();
+                STATE.courses = parsed.courses.filter(course => course && typeof course === 'object').map(course => {
+                    const lessonAssoc = normalizeLessonAssoc(course.lessonAssoc);
+                    if (lessonAssoc === null || seen.has(lessonAssoc)) return null;
+                    seen.add(lessonAssoc);
+                    const {isPaused, selectedConfirmed, ...details} = course;
                     return {
-                        ...course,
+                        ...details,
                         lessonAssoc,
-                        status: 'pending',
-                        isPaused: Boolean(course?.isPaused),
+                        status: course.status === 'paused' || course.status === 'selected' || course.isPaused === true ? 'paused' : 'pending',
+                        removeAfterStop: false,
+                        teacherNames: Array.isArray(course.teacherNames) ? course.teacherNames.filter(name => typeof name === 'string') : [],
+                        schedule: Array.isArray(course.schedule) ? course.schedule.filter(item => item && typeof item === 'object') : [],
+                        scheduleSummary: Array.isArray(course.scheduleSummary) ? course.scheduleSummary.filter(item => typeof item === 'string') : [],
                     };
                 }).filter(Boolean);
-                STATE.studentId = parsed.studentId ?? '';
-                STATE.turnId = parsed.turnId ?? '';
-                STATE.headers = parsed.headers ?? {};
-                STATE.skipCaptcha = parsed.skipCaptcha ?? false;
-                STATE.concurrency = normalizeConcurrency(parsed.concurrency ?? 2);
+                STATE.studentId = String(parsed.studentId ?? '');
+                STATE.turnId = String(parsed.turnId ?? '');
+                STATE.headers = parsed.headers && typeof parsed.headers === 'object' && !Array.isArray(parsed.headers)
+                    ? Object.fromEntries(Object.entries(parsed.headers).filter(([, value]) => typeof value === 'string')) : {};
+                STATE.skipCaptcha = parsed.skipCaptcha === true;
+                STATE.concurrency = normalizeConcurrency(parsed.concurrency);
+            } catch (error) {
+                console.warn('[抢课助手] 无法恢复保存的状态，使用默认状态:', error.message || error);
             }
         }
     };
 
-    // --- XHR 拦截 ---
-    const XHRInterceptor = {
-        init() {
-            const originalSend = XMLHttpRequest.prototype.send;
-            XMLHttpRequest.prototype.send = function (body) {
-                let url;
-                try {
-                    url = new URL(this._url, window.location.origin);
-                } catch (_error) {
-                    return originalSend.apply(this, arguments);
-                }
+    // --- 捕获请求处理 ---
+    const CapturedRequests = {
+        manualSelect(payload, headers) {
+            const lessonAssoc = normalizeLessonAssoc(payload?.requestMiddleDtos?.[0]?.lessonAssoc);
+            if (lessonAssoc === null) return;
+            SessionStore.capture(payload.studentAssoc, payload.courseSelectTurnAssoc, headers);
+            CourseStore.add([lessonAssoc]);
+            ExecutionEngine.refreshMissingCourseDetails();
+            UI.render();
+        },
+        importLessons(ids) {
+            if (!STATE.isImporting) return;
+            const importedCount = CourseStore.add(ids);
+            console.log(`[抢课助手] 导入 ${importedCount} 门新课程`);
+            SettingsStore.update({isImporting: false});
+            ExecutionEngine.refreshMissingCourseDetails();
+            UI.render();
+        },
+    };
 
-                // 捕获手动选课操作
-                if (url.pathname.includes('/api/v1/student/course-select/add-predicate')) {
-                    try {
-                        const payload = JSON.parse(body);
-                        const lessonAssoc = normalizeLessonAssoc(payload?.requestMiddleDtos?.[0]?.lessonAssoc);
-                        const studentAssoc = payload.studentAssoc;
-                        const turnId = payload.courseSelectTurnAssoc;
-                        if (lessonAssoc === null) {
-                            return originalSend.apply(this, arguments);
-                        }
-                        console.log(`[抢课助手] 捕获到 Lesson ${lessonAssoc}`);
-                        if (Object.keys(STATE.headers).length === 0) {
-                            STATE.headers = {...this._headers};
-                            delete STATE.headers['Host'];
-                            delete STATE.headers['Content-Length'];
-                            console.log('[抢课助手] 全局 Headers 已捕获:', STATE.headers);
-                        }
-                        STATE.studentId = studentAssoc.toString();
-                        STATE.turnId = turnId.toString();
-                        if (!STATE.courses.some(c => c.lessonAssoc === lessonAssoc)) {
-                            STATE.courses.push({lessonAssoc, status: 'pending', isPaused: false});
-                            rebuildConflicts();
-                            ExecutionEngine.syncCourseDetails([lessonAssoc])
-                                .catch((error) => {
-                                    console.warn('[抢课助手] 单课程详情同步失败:', error.message || error);
-                                });
-                        }
-                        Persistence.save();
-                        ExecutionEngine.refreshMissingCourseDetails();
-                        UI.render();
-                    } catch (e) {
-                        console.error('[抢课助手] 解析请求 payload 失败:', e);
+    // 内部状态记录不直接挂载到页面的 XHR 实例上 ---
+    const XHRInterceptor = {
+        uninstall: null,
+        init() {
+            if (this.uninstall) return;
+            const prototype = XMLHttpRequest.prototype;
+            const originals = {open: prototype.open, send: prototype.send, setRequestHeader: prototype.setRequestHeader};
+            const requests = new WeakMap();
+            const wrappers = {
+                open(method, url) {
+                    const result = originals.open.apply(this, arguments);
+                    requests.set(this, {url, headers: {}});
+                    return result;
+                },
+                setRequestHeader(name, value) {
+                    const result = originals.setRequestHeader.apply(this, arguments);
+                    const request = requests.get(this);
+                    if (request) {
+                        const key = String(name).toLowerCase();
+                        request.headers[key] = key in request.headers ? `${request.headers[key]}, ${value}` : String(value);
                     }
-                }
-                // 捕获页面课程列表加载操作（仅在导入模式下）
-                else if (STATE.isImporting && url.pathname.includes('/api/v1/student/course-select/std-count')) {
-                    const lessonIdsParam = url.searchParams.get('lessonIds');
-                    if (lessonIdsParam) {
-                        let importedCount = 0;
-                        lessonIdsParam.split(',').forEach(idStr => {
-                            const lessonAssoc = normalizeLessonAssoc(idStr);
-                            if (lessonAssoc !== null && !STATE.courses.some(c => c.lessonAssoc === lessonAssoc)) {
-                                STATE.courses.push({lessonAssoc, status: 'pending', isPaused: false});
-                                importedCount++;
+                    return result;
+                },
+                send(body) {
+                    const request = requests.get(this);
+                    if (request) {
+                        try {
+                            const url = new URL(request.url, window.location.origin);
+                            if (url.pathname.includes('/api/v1/student/course-select/add-predicate')) {
+                                CapturedRequests.manualSelect(JSON.parse(body), request.headers);
+                            } else if (url.pathname.includes('/api/v1/student/course-select/std-count')) {
+                                const ids = url.searchParams.get('lessonIds');
+                                if (ids) CapturedRequests.importLessons(ids.split(','));
                             }
-                        });
-                        console.log(`[抢课助手] 导入 ${importedCount} 门新课程 `);
-                        rebuildConflicts();
-                        if (importedCount > 0) {
-                            ExecutionEngine.syncCourseDetails(STATE.courses.map(c => c.lessonAssoc))
-                                .catch((error) => {
-                                    console.warn('[抢课助手] 批量课程详情同步失败:', error.message || error);
-                                });
+                        } catch (error) {
+                            console.warn('[抢课助手] 无法处理捕获的请求:', error.message || error);
                         }
-                        STATE.isImporting = false; // 导入一次后自动关闭
-                        Persistence.save();
-                        ExecutionEngine.refreshMissingCourseDetails();
-                        UI.render();
                     }
+                    return originals.send.apply(this, arguments);
+                },
+            };
+            Object.assign(prototype, wrappers);
+            this.uninstall = () => {
+                for (const name of Object.keys(originals)) {
+                    if (prototype[name] === wrappers[name]) prototype[name] = originals[name];
                 }
-                return originalSend.apply(this, arguments);
+                this.uninstall = null;
             };
-            const originalOpen = XMLHttpRequest.prototype.open;
-            XMLHttpRequest.prototype.open = function (method, url) {
-                this._url = url;
-                this._headers = {};
-                return originalOpen.apply(this, arguments);
-            };
-            const originalSetRequestHeader = XMLHttpRequest.prototype.setRequestHeader;
-            XMLHttpRequest.prototype.setRequestHeader = function (header, value) {
-                this._headers[header] = value;
-                return originalSetRequestHeader.apply(this, arguments);
-            };
-        }
+        },
     };
     // --- 抢课执行引擎 ---
     const ExecutionEngine = {
-        isCourseInfoIncomplete(course) {
-            return !course.courseName || !Array.isArray(course.teacherNames) || course.teacherNames.length === 0;
-        },
-        refreshMissingCourseDetails() {
-            if (STATE.courses.some(c => this.isCourseInfoIncomplete(c))) {
-                this.syncCourseDetails(STATE.courses.map(c => c.lessonAssoc))
-                    .finally(() => {
-                        STATE.hasIncompleteCourseInfo = STATE.courses.some(c => this.isCourseInfoIncomplete(c));
-                        UI.render();
-                    });
-            } else {
-                STATE.hasIncompleteCourseInfo = false;
+        pollGeneration: 0,
+        pollTimers: new Set(),
+        serverStatusRevision: 0,
+        isCommandPending: false,
+        async runCommand(command) {
+            if (this.isCommandPending) return;
+            this.isCommandPending = true;
+            UI.render();
+            try {
+                return await command();
+            } finally {
+                this.isCommandPending = false;
                 UI.render();
             }
         },
+        isCourseInfoIncomplete(course) {
+            return !course.courseName || !Array.isArray(course.teacherNames) || course.teacherNames.length === 0;
+        },
+        async refreshMissingCourseDetails() {
+            const ids = STATE.courses.filter(course => this.isCourseInfoIncomplete(course)).map(course => course.lessonAssoc);
+            try {
+                await this.syncCourseDetails(ids);
+            } catch (error) {
+                console.warn('[抢课助手] 课程详情同步失败:', error.message || error);
+            }
+        },
         async queryLessonDetails(lessonAssocs) {
-            const normalizedIds = uniqueNonEmpty((lessonAssocs || []).map(id => Number(id))).map(id => Number(id)).filter(id => Number.isFinite(id) && id > 0);
+            const normalizedIds = [...new Set((lessonAssocs || []).map(normalizeLessonAssoc).filter(id => id !== null))];
             if (normalizedIds.length === 0) return [];
             if (!STATE.studentId || !STATE.turnId || Object.keys(STATE.headers).length === 0) return [];
             const payload = {
@@ -1030,30 +1112,17 @@
             return lessons.map(lesson => normalizeLessonDetails(lesson));
         },
         async syncCourseDetails(lessonAssocs) {
+            const headers = STATE.headers;
             const [infos] = await Promise.all([
                 this.queryLessonDetails(lessonAssocs),
-                this.querySelectedCourses().catch(error => console.warn('[抢课助手] 冲突检查课表同步失败:', error.message || error)),
+                this.refreshSelectedCourses().catch(error => console.warn('[抢课助手] 冲突检查课表同步失败:', error.message || error)),
             ]);
-            const infoByLessonAssoc = new Map(infos.map(info => [info.lessonAssoc, info]));
-            let updated = false;
-            STATE.courses = STATE.courses.map(course => {
-                const info = infoByLessonAssoc.get(course.lessonAssoc);
-                if (!info) return course;
-                updated = true;
-                return {...course, ...info};
-            });
-            if (updated) {
-                Persistence.save();
-            }
-            rebuildConflicts();
-            UI.render();
+            if (STATE.headers !== headers) return [];
+            CourseStore.updateDetails(infos);
             return infos;
         },
-        async querySelectedCourses() {
+        async fetchSelectedCourses() {
             if (!STATE.studentId || !STATE.turnId || Object.keys(STATE.headers).length === 0) return [];
-            const studentId = STATE.studentId;
-            const turnId = STATE.turnId;
-            const headers = STATE.headers;
             const queryUrl = `/api/v1/student/course-select/selected-lessons/${encodeURIComponent(STATE.turnId)}/${encodeURIComponent(STATE.studentId)}`;
             const parsed = await requestApi(queryUrl, 'GET', null, {
                 baseUrl: '',
@@ -1062,31 +1131,35 @@
             if (parsed?.result !== 0 || !Array.isArray(parsed?.data)) {
                 throw new Error(parsed?.message || '已选课程响应格式无效');
             }
-            const selectedCourses = parsed.data.map(lesson => ({
+            return parsed.data.map(lesson => ({
                 ...normalizeLessonDetails(lesson),
-                status: 'success',
-                isPaused: true,
-                selectedConfirmed: true,
+                status: 'selected',
+                removeAfterStop: true,
             }));
-            if (STATE.studentId !== studentId || STATE.turnId !== turnId || STATE.headers !== headers) return [];
-            STATE.selectedCourses = selectedCourses;
-            rebuildConflicts();
+        },
+        async refreshSelectedCourses() {
+            const headers = STATE.headers;
+            const selectedCourses = await this.fetchSelectedCourses();
+            if (STATE.headers !== headers) throw new Error('会话已变更，忽略旧课表');
+            CourseStore.setSelected(selectedCourses);
             return selectedCourses;
         },
-        async syncSelectedCourses() {
+        async syncSelectedCourses(generation = this.pollGeneration) {
             if (!STATE.isGrabbing || this.isSelectedCoursesSyncing) return;
             this.isSelectedCoursesSyncing = true;
+            const headers = STATE.headers;
+            const isCurrent = () => generation === this.pollGeneration && STATE.isGrabbing && STATE.headers === headers;
             try {
-                const selectedCourses = await this.querySelectedCourses();
-                UI.render();
+                const selectedCourses = await this.refreshSelectedCourses();
+                if (!isCurrent()) return;
                 const selectedById = new Map(selectedCourses.map(c => [c.lessonAssoc, c]));
                 const selectedIds = new Set(
                     STATE.courses
-                        .filter(c => c.status !== 'success' && selectedById.has(c.lessonAssoc))
+                        .filter(c => !isCourseSuccessful(c) && selectedById.has(c.lessonAssoc))
                         .map(c => c.lessonAssoc)
                 );
                 const successIds = new Set([
-                    ...STATE.courses.filter(c => c.status === 'success').map(c => c.lessonAssoc),
+                    ...STATE.courses.filter(c => isCourseSuccessful(c)).map(c => c.lessonAssoc),
                     ...selectedIds,
                 ]);
                 const conflictIds = new Set(
@@ -1097,12 +1170,16 @@
                 const confirmedSelectedIds = new Set();
                 for (const course of STATE.courses) {
                     if (
-                        course.status === 'success' ||
-                        (course.isPaused && !selectedIds.has(course.lessonAssoc)) ||
+                        isCourseSuccessful(course) ||
+                        (course.status === 'paused' && !selectedIds.has(course.lessonAssoc)) ||
                         (!selectedIds.has(course.lessonAssoc) && !conflictIds.has(course.lessonAssoc))
                     ) continue;
                     try {
+                        if (!isCurrent()) return;
+                        this.serverStatusRevision++;
                         const status = await requestApi('/course/pause', 'POST', {lessonAssoc: course.lessonAssoc});
+                        this.serverStatusRevision++;
+                        if (!isCurrent()) return;
                         this.syncCoursesFromServer(status?.courses);
                         if (selectedIds.has(course.lessonAssoc)) confirmedSelectedIds.add(course.lessonAssoc);
                     } catch (error) {
@@ -1110,14 +1187,11 @@
                     }
                 }
 
-                STATE.courses = STATE.courses.map(course => {
+                if (!isCurrent()) return;
+                CourseStore.replace(STATE.courses.map(course => {
                     if (!confirmedSelectedIds.has(course.lessonAssoc)) return course;
-                    STATE.toBeRemoved.add(course.lessonAssoc);
                     return {...course, ...selectedById.get(course.lessonAssoc)};
-                });
-                Persistence.save();
-                rebuildConflicts();
-                UI.render();
+                }));
             } finally {
                 this.isSelectedCoursesSyncing = false;
             }
@@ -1136,38 +1210,25 @@
             if (byId.size === 0) return;
 
             let changed = false;
-            STATE.courses = STATE.courses.map((course) => {
+            const courses = STATE.courses.map((course) => {
                 const serverCourse = byId.get(course.lessonAssoc);
                 if (!serverCourse) return course;
 
-                if (course.selectedConfirmed) {
-                    STATE.toBeRemoved.add(course.lessonAssoc);
-                    return {...course, status: 'success', isPaused: true};
-                }
-
-                const nextStatus = serverCourse.status === 'success' ? 'success' : 'pending';
-                const nextPaused = serverCourse.status === 'paused';
+                // 已由网站确认选中的课程，不能被本地服务降级为其他状态
+                if (course.status === 'selected') return course;
                 const nextCourse = {
                     ...course,
-                    status: nextStatus,
-                    isPaused: nextPaused,
+                    status: serverCourse.status === 'success' ? 'success'
+                        : serverCourse.status === 'paused' ? 'paused' : 'pending',
+                    removeAfterStop: Boolean(serverCourse.markedForRemoval),
                 };
-
-                if (serverCourse.markedForRemoval) {
-                    STATE.toBeRemoved.add(course.lessonAssoc);
-                } else {
-                    STATE.toBeRemoved.delete(course.lessonAssoc);
-                }
-
-                if (nextCourse.status !== course.status || nextCourse.isPaused !== course.isPaused) {
+                if (nextCourse.status !== course.status || nextCourse.removeAfterStop !== course.removeAfterStop) {
                     changed = true;
                 }
                 return nextCourse;
             });
 
-            if (changed) {
-                Persistence.save();
-            }
+            if (changed) CourseStore.replace(courses);
         },
         handleServerError(status) {
             const serverError = status?.error;
@@ -1179,7 +1240,7 @@
             const noticeKey = `${code}|${message}|${serverError.at || ''}`;
 
             if (STATE.serverErrorNoticeKey !== noticeKey) {
-                alert(`本地服务发生严重错误，抢课已终止。\n[${code}] ${message}${at}`);
+                alert(`本地服务发生严重错误，抢课已终止 \n[${code}] ${message}${at}`);
                 STATE.serverErrorNoticeKey = noticeKey;
             }
 
@@ -1195,14 +1256,19 @@
             }
             if (!STATE.isGrabbing) return;
 
+            const generation = this.pollGeneration;
+            this.serverStatusRevision++;
             const path = pause ? '/course/pause' : '/course/resume';
             const status = await requestApi(path, 'POST', {lessonAssoc: normalizeLessonAssoc(lessonAssoc)});
+            this.serverStatusRevision++;
+            if (generation !== this.pollGeneration || !STATE.isGrabbing) return;
             this.syncCoursesFromServer(status?.courses);
             STATE.rps = Number(status?.rps || 0);
             STATE.workers = Number(status?.workers || 0);
             UI.render();
         },
         async start() {
+            this.serverStatusRevision++;
             if (!STATE.studentId || !STATE.turnId || Object.keys(STATE.headers).length === 0) {
                 alert('上下文信息不完整，请先在网页上进行一次手动选课操作以自动捕获');
                 return;
@@ -1213,12 +1279,13 @@
             }
 
             STATE.concurrency = normalizeConcurrency(STATE.concurrency);
-            STATE.toBeRemoved.clear();
-            STATE.courses.forEach(c => {
-                c.status = 'pending';
-                delete c.selectedConfirmed;
-            });
-            await this.syncCourseDetails(STATE.courses.map(c => c.lessonAssoc)).catch(() => {
+            CourseStore.replace(STATE.courses.map(course => ({
+                ...course,
+                status: course.status === 'paused' || course.status === 'selected' ? 'paused' : 'pending',
+                removeAfterStop: false,
+            })));
+            await this.syncCourseDetails(STATE.courses.map(c => c.lessonAssoc)).catch(error => {
+                console.warn('[抢课助手] 抢课前详情同步失败，继续使用已有信息:', error.message || error);
             });
             const courses = getCoursePayload();
             const runnableCount = courses.filter(course => !course.isPaused).length;
@@ -1245,31 +1312,32 @@
             UI.render();
         },
         async stop() {
-            const stopResult = await requestApi('/stop', 'POST', {}).catch(() => ({}));
+            this.stopPolling();
+            let stopResult;
+            try {
+                stopResult = await requestApi('/stop', 'POST', {});
+            } catch (error) {
+                if (STATE.isGrabbing) this.startPolling();
+                throw error;
+            }
             STATE.isGrabbing = false;
             STATE.rps = 0;
             STATE.workers = 0;
             const removedCourses = uniqueNonEmpty(
                 ((stopResult?.removedCourses || []).map(id => normalizeLessonAssoc(id)).filter(id => id !== null))
             ).map(Number);
-            const removedSet = new Set([...STATE.toBeRemoved, ...removedCourses]);
-            if (removedSet.size > 0) {
-                STATE.courses = STATE.courses.filter(course => !removedSet.has(course.lessonAssoc));
-            }
-            STATE.toBeRemoved.clear();
-            STATE.courses.forEach((course) => {
-                course.isPaused = false;
-                if (course.status !== 'success') {
-                    course.status = 'pending';
-                }
-            });
-            Persistence.save();
+            const removedSet = new Set([...STATE.courses.filter(course => course.removeAfterStop).map(course => course.lessonAssoc), ...removedCourses]);
             this.stopPolling();
-            rebuildConflicts();
-            UI.render();
+            CourseStore.replace(STATE.courses.filter(course => !removedSet.has(course.lessonAssoc)).map(course => ({
+                ...course,
+                status: isCourseSuccessful(course) ? course.status : 'pending',
+                removeAfterStop: false,
+            })));
         },
-        async pollGrabStatus() {
-            let status = await requestApi('/status', 'GET');
+        async pollGrabStatus(generation = this.pollGeneration) {
+            const revision = this.serverStatusRevision;
+            const status = await requestApi('/status', 'GET');
+            if (generation !== this.pollGeneration || revision !== this.serverStatusRevision) return;
             this.syncCoursesFromServer(status?.courses);
             if (this.handleServerError(status)) {
                 UI.render();
@@ -1285,32 +1353,30 @@
         },
         startPolling() {
             this.stopPolling();
-            this.pollGrabStatus().catch(error => {
-                console.error('[抢课助手] 获取服务端状态失败:', error.message || error);
-            });
-            this.syncSelectedCourses().catch(error => {
-                console.warn('[抢课助手] 已选课程同步失败:', error.message || error);
-            });
-            STATE.grabStatusIntvId = setInterval(() => {
-                this.pollGrabStatus().catch(error => {
-                    console.error('[抢课助手] 获取服务端状态失败:', error.message || error);
-                });
-            }, 1000);
-            STATE.syncSelectedCoursesIntvId = setInterval(() => {
-                this.syncSelectedCourses().catch(error => {
-                    console.warn('[抢课助手] 已选课程同步失败:', error.message || error);
-                });
-            }, 5000);
+            const generation = this.pollGeneration;
+            const poll = async (method, delay, label) => {
+                try {
+                    await this[method](generation);
+                } catch (error) {
+                    if (generation === this.pollGeneration) console.warn(`[抢课助手] ${label}:`, error.message || error);
+                } finally {
+                    if (generation === this.pollGeneration && STATE.isGrabbing) {
+                        const timer = setTimeout(() => {
+                            this.pollTimers.delete(timer);
+                            poll(method, delay, label);
+                        }, delay);
+                        this.pollTimers.add(timer);
+                    }
+                }
+            };
+            poll('pollGrabStatus', 1000, '获取服务端状态失败');
+            poll('syncSelectedCourses', 5000, '已选课程同步失败');
         },
         stopPolling() {
-            if (STATE.grabStatusIntvId) {
-                clearInterval(STATE.grabStatusIntvId);
-                STATE.grabStatusIntvId = null;
-            }
-            if (STATE.syncSelectedCoursesIntvId) {
-                clearInterval(STATE.syncSelectedCoursesIntvId);
-                STATE.syncSelectedCoursesIntvId = null;
-            }
+            this.pollGeneration++;
+            this.serverStatusRevision++;
+            this.pollTimers.forEach(timer => clearTimeout(timer));
+            this.pollTimers.clear();
         },
     };
 
@@ -1325,14 +1391,20 @@
             }
         };
         const mountUi = async () => {
-            await ExecutionEngine.querySelectedCourses().catch(err => console.warn('[抢课助手] 初始化课表同步失败:', err.message || err));
             rebuildConflicts();
             UI.createPanel();
             uiMounted = true;
             UI.render();
-            runInitialCourseSync();
+            if (STATE.courses.length) {
+                runInitialCourseSync();
+            } else {
+                ExecutionEngine.refreshSelectedCourses().then(() => UI.render())
+                    .catch(err => console.warn('[抢课助手] 初始化课表同步失败:', err.message || err));
+            }
             showFirstRunNotice();
+            const revision = ExecutionEngine.serverStatusRevision;
             requestApi('/status', 'GET').then((status) => {
+                if (revision !== ExecutionEngine.serverStatusRevision) return;
                 STATE.isGrabbing = Boolean(status?.running);
                 STATE.rps = Number(status?.rps || 0);
                 STATE.workers = Number(status?.workers || 0);
@@ -1344,7 +1416,8 @@
                     ExecutionEngine.startPolling();
                 }
                 UI.render();
-            }).catch(() => {
+            }).catch(error => {
+                console.warn('[抢课助手] 无法连接本地服务:', error.message || error);
             });
         };
         if (document.readyState === 'loading') {
@@ -1353,7 +1426,6 @@
             mountUi();
         }
         XHRInterceptor.init();
-        runInitialCourseSync();
     }
 
     init();
