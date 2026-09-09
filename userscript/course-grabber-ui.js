@@ -1,4 +1,7 @@
-// UI resources loaded by course-grabber.user.js via @require.
+// @version      0.1
+// @compatible   course-grabber.user.js >= 0.3.3
+// @description  UI resources loaded by course-grabber.user.js via @require.
+
 (function (global) {
     'use strict';
 
