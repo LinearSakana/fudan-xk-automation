@@ -227,15 +227,22 @@
         return courses;
     }
 
-    async function requestApi(path, method = 'GET', payload = null) {
-        const response = await fetch(`${SERVER_BASE_URL}${path}`, {
+    async function requestApi(path, method = 'GET', payload = null, options = {}) {
+        const {
+            baseUrl = SERVER_BASE_URL,
+            headers = {},
+        } = options;
+        const response = await fetch(`${baseUrl}${path}`, {
             method,
-            headers: {'Content-Type': 'application/json'},
+            headers: {'Content-Type': 'application/json', ...headers},
             body: payload ? JSON.stringify(payload) : undefined,
         });
         const parsed = await response.json().catch(() => ({}));
         if (!response.ok) {
-            throw new Error(parsed.error || `HTTP ${response.status}`);
+            const error = new Error(parsed.error || parsed.message || `HTTP ${response.status}`);
+            error.status = response.status;
+            error.data = parsed;
+            throw error;
         }
         return parsed;
     }
@@ -1201,12 +1208,13 @@
                 substitutedCourseId: null, courseSubstitutePoolId: null, sortField: 'lesson', sortType: 'ASC',
             };
             const queryUrl = `/api/v1/student/course-select/query-lesson/${STATE.studentId}/${STATE.turnId}`;
-            const response = await fetch(queryUrl, {
-                method: 'POST',
-                headers: {...STATE.headers, 'Content-Type': 'application/json;charset=UTF-8'},
-                body: JSON.stringify(payload),
+            const parsed = await requestApi(queryUrl, 'POST', payload, {
+                baseUrl: '',
+                headers: {
+                    ...STATE.headers,
+                    'Content-Type': 'application/json;charset=UTF-8',
+                },
             });
-            const parsed = await response.json().catch(() => ({}));
             const lessons = parsed?.data?.lessons;
             if (parsed.result !== 0 || !Array.isArray(lessons)) return [];
             return lessons.map(lesson => normalizeLessonDetails(lesson));
@@ -1237,9 +1245,11 @@
             const turnId = STATE.turnId;
             const headers = STATE.headers;
             const queryUrl = `/api/v1/student/course-select/selected-lessons/${encodeURIComponent(STATE.turnId)}/${encodeURIComponent(STATE.studentId)}`;
-            const response = await fetch(queryUrl, {headers: {...STATE.headers}});
-            const parsed = await response.json().catch(() => ({}));
-            if (!response.ok || parsed?.result !== 0 || !Array.isArray(parsed?.data)) {
+            const parsed = await requestApi(queryUrl, 'GET', null, {
+                baseUrl: '',
+                headers: {...STATE.headers},
+            });
+            if (parsed?.result !== 0 || !Array.isArray(parsed?.data)) {
                 throw new Error(parsed?.message || '已选课程响应格式无效');
             }
             const selectedCourses = parsed.data.map(lesson => ({
