@@ -24,12 +24,12 @@
     const STORAGE_KEY = 'fudan_course_grabber_state';
     const FIRST_RUN_NOTICE_KEY = 'first_run_notice_v2';
     const STATE = {
-        courses: [], // status: 'pending' | 'paused' | 'success' | 'selected'; removeAfterStop is an independent server instruction.
+        courses: [], // 课程可处于如下状态： 'pending' | 'paused' | 'success' | 'selected'
         selectedCourses: [],
         courseConflicts: new Map(), // lessonAssoc -> Array<{ lessonAssoc, lessonNameZh }>
         studentId: '',
         turnId: '',
-        headers: {}, // 从原始请求中捕获的全局 HTTP 头
+        headers: {}, // 自动捕获的全局 HTTP 头
         isGrabbing: false,
         skipCaptcha: false, // 是否跳过验证码
         isImporting: false,
@@ -619,11 +619,11 @@
                     STATE.courseConflicts.get(Number(course.lessonAssoc))?.length ? 'course-conflict' : '',
                     course.status === 'paused' && STATE.isGrabbing ? 'course-paused' : '',
                 ].filter(Boolean).join(' ');
-                // Keep the UI resource contract compatible with the existing remote asset.
+                // 保持 UI 资源接口兼容性
                 const view = {...course, status: isCourseSuccessful(course) ? 'success' : 'pending', isPaused: course.status === 'paused'};
                 return `<li data-index="${index}" class="${classes}">${UI_ASSETS.courseListItem(view, index, STATE.isGrabbing, escapeHtml)}</li>`;
             }).join('');
-            // Preserve focused buttons, hover and native dragging on metric-only updates.
+            // 仅更新指标时保留显示状态
             if (this.lastCourseMarkup !== markup) {
                 this.courseListEl.innerHTML = markup;
                 this.lastCourseMarkup = markup;
@@ -853,7 +853,6 @@
         }
     };
 
-    // Course mutations own conflict rebuilding, persistence and notification.
     const CourseStore = {
         replace(courses) {
             STATE.courses = courses;
@@ -905,7 +904,7 @@
         },
     };
 
-    // Session headers and identifiers are replaced together; header identity invalidates old requests.
+    // 请求头发生变化时，旧请求将失效
     const SessionStore = {
         capture(studentId, turnId, headers) {
             if (studentId == null || turnId == null) throw new Error('选课请求缺少会话信息');
@@ -955,7 +954,7 @@
                 const savedState = localStorage.getItem(STORAGE_KEY);
                 if (!savedState) return;
                 const parsed = JSON.parse(savedState);
-                // Unversioned storage is the original format; keep it readable.
+                // 无版本号的存储数据属于旧版格式，保持向后兼容
                 if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)
                     || (parsed.version != null && parsed.version !== 1)
                     || !Array.isArray(parsed.courses)) {
@@ -990,7 +989,7 @@
         }
     };
 
-    // --- Captured request actions ---
+    // --- 捕获请求处理 ---
     const CapturedRequests = {
         manualSelect(payload, headers) {
             const lessonAssoc = normalizeLessonAssoc(payload?.requestMiddleDtos?.[0]?.lessonAssoc);
@@ -1010,7 +1009,7 @@
         },
     };
 
-    // --- XHR observation: bookkeeping stays off the page's XHR instances. ---
+    // 内部状态记录不直接挂载到页面的 XHR 实例上 ---
     const XHRInterceptor = {
         uninstall: null,
         init() {
@@ -1216,7 +1215,7 @@
                 const serverCourse = byId.get(course.lessonAssoc);
                 if (!serverCourse) return course;
 
-                // A website-confirmed selection cannot be downgraded by the local server.
+                // 已由网站确认选中的课程，不能被本地服务降级为其他状态
                 if (course.status === 'selected') return course;
                 const nextCourse = {
                     ...course,
@@ -1242,7 +1241,7 @@
             const noticeKey = `${code}|${message}|${serverError.at || ''}`;
 
             if (STATE.serverErrorNoticeKey !== noticeKey) {
-                alert(`本地服务发生严重错误，抢课已终止。\n[${code}] ${message}${at}`);
+                alert(`本地服务发生严重错误，抢课已终止 \n[${code}] ${message}${at}`);
                 STATE.serverErrorNoticeKey = noticeKey;
             }
 
