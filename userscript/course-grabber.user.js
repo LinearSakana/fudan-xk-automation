@@ -856,15 +856,7 @@
                     alert('请先停止抢课！');
                     return;
                 }
-                STATE.studentId = '';
-                STATE.turnId = '';
-                STATE.headers = {};
-                STATE.selectedCourses = [];
-                rebuildConflicts();
-                STATE.rps = 0;
-                STATE.workers = 0;
-                Persistence.save();
-                this.render();
+                SessionStore.reset();
                 console.log('[抢课助手] 上下文信息已重置 ');
             });
             document.getElementById('import-btn').addEventListener('click', () => {
@@ -877,6 +869,34 @@
                 alert('导入模式已开启！请在选课页面进行一次翻页或筛选操作，脚本即自动捕获当前页所有课程 ');
             });
         }
+    };
+
+    // Session headers and identifiers are replaced together; header identity invalidates old requests.
+    const SessionStore = {
+        capture(studentId, turnId, headers) {
+            if (studentId == null || turnId == null) throw new Error('选课请求缺少会话信息');
+            const nextStudentId = String(studentId), nextTurnId = String(turnId);
+            if (STATE.studentId !== nextStudentId || STATE.turnId !== nextTurnId) {
+                STATE.selectedCourses = [];
+                rebuildConflicts();
+            }
+            STATE.studentId = nextStudentId;
+            STATE.turnId = nextTurnId;
+            STATE.headers = Object.fromEntries(Object.entries(headers)
+                .filter(([name]) => !['host', 'content-length'].includes(name.toLowerCase())));
+            Persistence.save();
+        },
+        reset() {
+            STATE.studentId = '';
+            STATE.turnId = '';
+            STATE.headers = {};
+            STATE.selectedCourses = [];
+            STATE.rps = 0;
+            STATE.workers = 0;
+            rebuildConflicts();
+            Persistence.save();
+            UI.render();
+        },
     };
 
     // --- 数据持久化 ---
@@ -959,14 +979,7 @@
                             return originalSend.apply(this, arguments);
                         }
                         console.log(`[抢课助手] 捕获到 Lesson ${lessonAssoc}`);
-                        if (Object.keys(STATE.headers).length === 0) {
-                            STATE.headers = {...this._headers};
-                            delete STATE.headers['Host'];
-                            delete STATE.headers['Content-Length'];
-                            console.log('[抢课助手] 全局 Headers 已捕获:', STATE.headers);
-                        }
-                        STATE.studentId = studentAssoc.toString();
-                        STATE.turnId = turnId.toString();
+                        SessionStore.capture(studentAssoc, turnId, this._headers);
                         if (!STATE.courses.some(c => c.lessonAssoc === lessonAssoc)) {
                             STATE.courses.push({lessonAssoc, status: 'pending', isPaused: false});
                             rebuildConflicts();
@@ -1053,10 +1066,12 @@
             return lessons.map(lesson => normalizeLessonDetails(lesson));
         },
         async syncCourseDetails(lessonAssocs) {
+            const headers = STATE.headers;
             const [infos] = await Promise.all([
                 this.queryLessonDetails(lessonAssocs),
                 this.refreshSelectedCourses().catch(error => console.warn('[抢课助手] 冲突检查课表同步失败:', error.message || error)),
             ]);
+            if (STATE.headers !== headers) return [];
             const infoByLessonAssoc = new Map(infos.map(info => [info.lessonAssoc, info]));
             let updated = false;
             STATE.courses = STATE.courses.map(course => {
