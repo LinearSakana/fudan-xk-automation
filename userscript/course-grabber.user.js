@@ -1,14 +1,14 @@
 // ==UserScript==
 // @name         复旦选课助手
 // @namespace    https://github.com/LinearSakana/fudan-xk-automation
-// @version      0.3.3
+// @version      0.3.4
 // @description  复旦大学本科生选课助手，使用前请确保已启动本地 Server
 // @author       LinearSakana
 // @match        *://xk.fudan.edu.cn/*
 // @icon         https://id.fudan.edu.cn/ac/favicon.ico
 // @grant        none
 // @run-at       document-start
-// @require      https://cdn.jsdelivr.net/gh/LinearSakana/fudan-xk-automation@main/userscript/course-grabber-ui.js?v=0.1
+// @require      https://cdn.jsdelivr.net/gh/LinearSakana/fudan-xk-automation@main/userscript/course-grabber-ui.js?v=0.2
 // @updateURL    https://cdn.jsdelivr.net/gh/LinearSakana/fudan-xk-automation@main/userscript/course-grabber.user.js
 // @downloadURL  https://cdn.jsdelivr.net/gh/LinearSakana/fudan-xk-automation@main/userscript/course-grabber.user.js
 // ==/UserScript==
