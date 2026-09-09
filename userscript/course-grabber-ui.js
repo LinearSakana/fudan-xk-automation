@@ -178,7 +178,6 @@
                 .checkbox-label input:focus-visible + .checkmark { outline: 2px solid #3182ce; outline-offset: 2px; }
                 .checkmark { width: 14px; height: 14px; border: 2px solid #cbd5e0; border-radius: 4px; display: inline-block; position: relative; top: 1px; transition: all 0.2s; }
                 .checkbox-label input:checked + .checkmark { background: #3182ce; border-color: #3182ce; }
-                .checkbox-label input:checked + .checkmark::after { content: ''; position: absolute; left: 4px; top: 1px; width: 4px; height: 8px; border: solid white; border-width: 0 2px 2px 0; transform: rotate(45deg); }
                 .rps-display { display: grid; box-sizing: border-box; flex: 0 0 82px; min-width: 0; overflow: hidden; padding: 3px 7px; border: 1px solid #e2e8f0; border-radius: 9px; background: linear-gradient(135deg, #f7fafc, #edf2f7); color: #718096; font-size: 11px; line-height: 16px; }
                 .grabber-metric { grid-area: 1 / 1; display: flex; align-items: center; justify-content: space-between; gap: 6px; white-space: nowrap; animation: grabber-metric-cycle 6s ease-in-out infinite; }
                 .grabber-metric:nth-child(2) { animation-delay: -3s; }
