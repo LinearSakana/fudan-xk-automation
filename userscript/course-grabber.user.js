@@ -1241,7 +1241,8 @@
                 c.status = 'pending';
                 delete c.selectedConfirmed;
             });
-            await this.syncCourseDetails(STATE.courses.map(c => c.lessonAssoc)).catch(() => {
+            await this.syncCourseDetails(STATE.courses.map(c => c.lessonAssoc)).catch(error => {
+                console.warn('[抢课助手] 抢课前详情同步失败，继续使用已有信息:', error.message || error);
             });
             const courses = getCoursePayload();
             const runnableCount = courses.filter(course => !course.isPaused).length;
@@ -1268,7 +1269,7 @@
             UI.render();
         },
         async stop() {
-            const stopResult = await requestApi('/stop', 'POST', {}).catch(() => ({}));
+            const stopResult = await requestApi('/stop', 'POST', {});
             STATE.isGrabbing = false;
             STATE.rps = 0;
             STATE.workers = 0;
@@ -1367,7 +1368,8 @@
                     ExecutionEngine.startPolling();
                 }
                 UI.render();
-            }).catch(() => {
+            }).catch(error => {
+                console.warn('[抢课助手] 无法连接本地服务:', error.message || error);
             });
         };
         if (document.readyState === 'loading') {
