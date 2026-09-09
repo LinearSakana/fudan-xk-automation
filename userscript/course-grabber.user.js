@@ -386,7 +386,7 @@
                     throw new Error('请先手动点一次选课，捕获状态后再刷新课表');
                 }
                 const studentId = STATE.studentId, turnId = STATE.turnId, headers = STATE.headers;
-                const selected = await ExecutionEngine.querySelectedCourses();
+                const selected = await ExecutionEngine.refreshSelectedCourses();
                 if (studentId !== STATE.studentId || turnId !== STATE.turnId || headers !== STATE.headers) {
                     throw new Error('状态已变更，请重新捕获状态后再刷新课表');
                 }
@@ -1055,7 +1055,7 @@
         async syncCourseDetails(lessonAssocs) {
             const [infos] = await Promise.all([
                 this.queryLessonDetails(lessonAssocs),
-                this.querySelectedCourses().catch(error => console.warn('[抢课助手] 冲突检查课表同步失败:', error.message || error)),
+                this.refreshSelectedCourses().catch(error => console.warn('[抢课助手] 冲突检查课表同步失败:', error.message || error)),
             ]);
             const infoByLessonAssoc = new Map(infos.map(info => [info.lessonAssoc, info]));
             let updated = false;
@@ -1072,11 +1072,8 @@
             UI.render();
             return infos;
         },
-        async querySelectedCourses() {
+        async fetchSelectedCourses() {
             if (!STATE.studentId || !STATE.turnId || Object.keys(STATE.headers).length === 0) return [];
-            const studentId = STATE.studentId;
-            const turnId = STATE.turnId;
-            const headers = STATE.headers;
             const queryUrl = `/api/v1/student/course-select/selected-lessons/${encodeURIComponent(STATE.turnId)}/${encodeURIComponent(STATE.studentId)}`;
             const parsed = await requestApi(queryUrl, 'GET', null, {
                 baseUrl: '',
@@ -1091,7 +1088,12 @@
                 isPaused: true,
                 selectedConfirmed: true,
             }));
-            if (STATE.studentId !== studentId || STATE.turnId !== turnId || STATE.headers !== headers) return [];
+            return selectedCourses;
+        },
+        async refreshSelectedCourses() {
+            const headers = STATE.headers;
+            const selectedCourses = await this.fetchSelectedCourses();
+            if (STATE.headers !== headers) throw new Error('会话已变更，忽略旧课表');
             STATE.selectedCourses = selectedCourses;
             rebuildConflicts();
             return selectedCourses;
@@ -1100,7 +1102,7 @@
             if (!STATE.isGrabbing || this.isSelectedCoursesSyncing) return;
             this.isSelectedCoursesSyncing = true;
             try {
-                const selectedCourses = await this.querySelectedCourses();
+                const selectedCourses = await this.refreshSelectedCourses();
                 UI.render();
                 const selectedById = new Map(selectedCourses.map(c => [c.lessonAssoc, c]));
                 const selectedIds = new Set(
@@ -1349,12 +1351,16 @@
             }
         };
         const mountUi = async () => {
-            await ExecutionEngine.querySelectedCourses().catch(err => console.warn('[抢课助手] 初始化课表同步失败:', err.message || err));
             rebuildConflicts();
             UI.createPanel();
             uiMounted = true;
             UI.render();
-            runInitialCourseSync();
+            if (STATE.courses.length) {
+                runInitialCourseSync();
+            } else {
+                ExecutionEngine.refreshSelectedCourses().then(() => UI.render())
+                    .catch(err => console.warn('[抢课助手] 初始化课表同步失败:', err.message || err));
+            }
             showFirstRunNotice();
             requestApi('/status', 'GET').then((status) => {
                 STATE.isGrabbing = Boolean(status?.running);
@@ -1378,7 +1384,6 @@
             mountUi();
         }
         XHRInterceptor.init();
-        runInitialCourseSync();
     }
 
     init();
