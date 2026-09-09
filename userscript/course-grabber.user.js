@@ -452,6 +452,9 @@
                 this.render();
                 UI.render();
             } catch (error) {
+                if (error.status === 401) {
+                    alert('未登录或状态已过期，请重新登录后再尝试');
+                }
                 message.textContent = `${error.message || error}${this.courses.length ? '（保留上次课表）' : ''}`;
             } finally {
                 button.disabled = false;
